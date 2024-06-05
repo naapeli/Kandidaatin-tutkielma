@@ -47,11 +47,10 @@ phi = reshape(ones(d1,1)*phi, d1*d2, 1);
 %Now [s, phi] contains all distance angle pairs
 
 ss = sin(phi); cc = cos(phi);
-
 K = length(s);
 p = 1/N*[0:N]';
-AT = [];
 
+AT = [];
 
 Temp = sparse(N*N,m);
 for k = 1:K
@@ -63,6 +62,7 @@ for k = 1:K
       aux = find((x>=0)&(x<=1));
       txy = [txy;[t(aux),x(aux),p(aux)]];
    end
+   
    
    % Finding intersection points with lines x = j/N, 0<=j<=N
    if abs(ss(k)) > eps
@@ -93,12 +93,12 @@ for k = 1:K
    ymids = ymids(iaux); 
    indx = ceil(N*xmids);
    indy = ceil(N*(1-ymids));
-   
+
    Temp((indx'-1)*N + indy',mod(k,m-1)+1) = lengths;
    
    % summing the m rows and saving as a column in AT
    if mod(k,m)==0
-       kk = k/m; 
+       kk = k/m;
        AT(:,kk) = sum(Temp,2)/m;
        Temp = sparse(N*N,m);
    end
