@@ -1,10 +1,10 @@
 import numpy as np
-from scipy.sparse import lil_array, save_npz, load_npz
+from scipy.sparse import lil_array, csr_array, save_npz, load_npz
 from time import perf_counter
 
 
 def get_projection_matricies(offsets, angles, N, m):
-    assert len(offsets) % m == 0, "The number of offsets len(offsets) must be divisible by the number of rays (m)."
+    assert len(offsets) % m == 0, "The number of offsets len(offsets) must be divisible by the number of rays m."
     x, y = np.meshgrid(offsets, angles)
     offset_angle_pairs = np.vstack([x.ravel(), y.ravel()]).T
 
@@ -49,16 +49,19 @@ def get_projection_matricies(offsets, angles, N, m):
         indy = np.ceil(N * (1 - ymids))
 
         # array slicing and updating Temp takes the most amount of time
-        Temp[(indx - 1) * N + indy - 1, k % (m - 1)] = lengths
+        if m > 1:
+            Temp[(indx - 1) * N + indy - 1, k % (m - 1)] = lengths
 
-        if k % m == 0:
-            kk = (k // m) - 1
-            A[kk] = Temp.sum(axis=1) / m
-            Temp = lil_array(np.zeros(shape=(N * N, m)))
+            if k % m == 0:
+                kk = (k // m) - 1
+                A[kk] = Temp.sum(axis=1) / m
+                Temp = lil_array(np.zeros(shape=(N * N, m)))
+        elif m == 1:
+            A[k - 1, (indx - 1) * N + indy - 1] = lengths
         if k % 5000 == 0:
             print(k, len(offset_angle_pairs))
     # return sparse matrix of the csr format for efficient row operations and saving
-    return A.tocsr()
+    return csr_array(A)
 
 
 # testing
@@ -68,7 +71,7 @@ if __name__ == "__main__":
     N = 49
     n = 21
     nn = mm * n
-    DO_CALCULATIONS = False
+    DO_CALCULATIONS = True
 
     if DO_CALCULATIONS:
         start = perf_counter()
