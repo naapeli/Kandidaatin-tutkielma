@@ -1,20 +1,20 @@
 import numpy as np
-from scipy.sparse import lil_array
+from scipy.sparse import lil_array, save_npz, load_npz
 from time import perf_counter
 
 
 def get_projection_matricies(offsets, angles, N, m):
     assert len(offsets) % m == 0, "The number of offsets len(offsets) must be divisible by the number of rays (m)."
-    print(len(offsets), len(angles))
     x, y = np.meshgrid(offsets, angles)
     offset_angle_pairs = np.vstack([x.ravel(), y.ravel()]).T
 
     epsilon = 1e-10
-    p = np.linspace(0, 1, N) # x or y coordinates of gridlines
+    p = np.linspace(0, 1, N + 1) # x or y coordinates of gridlines ( + 1 to get the same results as in matlab)
 
     Temp = lil_array(np.zeros(shape=(N * N, m)))
-    A = np.zeros(shape=(len(offset_angle_pairs) // m, N * N))
-    for k, (offset, angle) in enumerate(offset_angle_pairs):
+    A = lil_array(np.zeros(shape=(len(offset_angle_pairs) // m, N * N)))
+    for i, (offset, angle) in enumerate(offset_angle_pairs):
+        k = i + 1 # this change so that k is the same as in matlab
         intersection_points = np.array([[0, 0, 0]]) # t, x, y
         cos = np.cos(angle)
         sin = np.sin(angle)
@@ -45,35 +45,40 @@ def get_projection_matricies(offsets, angles, N, m):
         lengths = lengths[iaux]
         xmids = xmids[iaux]
         ymids = ymids[iaux]
-        indx = np.floor(N * xmids)
-        indy = np.floor(N * (1 - ymids))
+        indx = np.ceil(N * xmids)
+        indy = np.ceil(N * (1 - ymids))
 
         # array slicing and updating Temp takes the most amount of time
-        Temp[(indx - 1) * N + indy, k % (m - 1)] = lengths
+        Temp[(indx - 1) * N + indy - 1, k % (m - 1)] = lengths
 
         if k % m == 0:
-            kk = k // m
+            kk = (k // m) - 1
             A[kk] = Temp.sum(axis=1) / m
             Temp = lil_array(np.zeros(shape=(N * N, m)))
         if k % 5000 == 0:
             print(k, len(offset_angle_pairs))
-    return A
+    # return sparse matrix of the csr format for efficient row operations and saving
+    return A.tocsr()
 
-m = 100
-mm = 133
-N = 49
-n = 21
-nn = mm * n
-DO_CALCULATIONS = False
 
-if DO_CALCULATIONS:
-    start = perf_counter()
-    result = get_projection_matricies(np.linspace(-0.49, 0.49, nn), np.arange(np.pi/(2 * m), np.pi + np.pi / (2 * m), np.pi / m), N, mm)
-    print(f"Time taken: {perf_counter() - start}")
-    print(result)
-    print(result.shape)
-    np.save("Code/Projection_matrix.npy", result)
-else:
-    result = np.load("Code/Projection_matrix.npy")
-    print(result)
-    print(result.shape)
+# testing
+if __name__ == "__main__":
+    m = 100
+    mm = 133
+    N = 49
+    n = 21
+    nn = mm * n
+    DO_CALCULATIONS = False
+
+    if DO_CALCULATIONS:
+        start = perf_counter()
+        result = get_projection_matricies(np.linspace(-0.49, 0.49, nn), np.arange(np.pi/(2 * m), np.pi + np.pi / (2 * m), np.pi / m), N, mm)
+        print(f"Time taken: {perf_counter() - start}")
+        print(result.todense())
+        print(result.shape)
+        save_npz("Code/Projection_matrix.npz", result)
+    else:
+        result = load_npz("Code/Projection_matrix.npz")
+        print(result.todense())
+        print(result.shape)
+        print(type(result))

@@ -78,6 +78,7 @@ for k = 1:K
    [tt,I] = sort(txy(:,1));
    txy = [tt,txy(I,2),txy(I,3)];
 
+
    % Computing the intersection lengths and pixels.   
    % If the X-ray passes from corner to corner of the pixel, the corner
    % coordinates appear twice. Discarding redundant intersections corresponding
@@ -90,7 +91,7 @@ for k = 1:K
    iaux = find(lengths > eps);
    lengths = lengths(iaux);
    xmids = xmids(iaux);
-   ymids = ymids(iaux); 
+   ymids = ymids(iaux);
    indx = ceil(N*xmids);
    indy = ceil(N*(1-ymids));
 
