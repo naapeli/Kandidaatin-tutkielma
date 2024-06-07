@@ -43,11 +43,11 @@ clear all
 % Choose if you form the whole X-ray matrices for simulation, optimization 
 % and reconstruction. This needs to be done if discretization-related
 % parameters are changed below
-form_xray = true; 
+form_xray = false; 
 
 % Make wise choices before you can start:
 visualize_variances = true; % visualize variances after each optimization step?
-draws_from_posterior = true; % visualize random draws from the current posterior?
+draws_from_posterior = false; % visualize random draws from the current posterior?
 D_optimality = false; % compute D-optimal angles and positions?
 A_optimality = true; % compute A-optimal angles and positions?
 pauseko = false; % wheather there is a pause between the optimization rounds 
