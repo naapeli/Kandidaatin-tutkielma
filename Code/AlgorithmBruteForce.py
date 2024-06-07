@@ -48,6 +48,7 @@ def run_algorithm():
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, mm)
         print("Calculation finished")
+        print(R_k.shape, ((k * m) // mm, N * N))
     else:
         try:
             R_k: csr_array = load_npz("Code/Projection_matrix.npz")
@@ -75,28 +76,18 @@ def run_algorithm():
     for i in range(number_of_pictures):
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
-        A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
-        Rk_gamma_prior_A_T = R_k @ gamma_prior @ A.T
 
-        # find optimal d on this picture with gradient descent
-        for l in range(iter_per_picture):
-            print(l, iter_per_picture)
-            gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
-            Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+        for j in range(k):
+            for jj in range(m):
+                Rk_temp = R_k[j*m + jj - 1: (j + 1)*m + jj - 1, :]
+                gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
+                Z_k = np.linalg.inv(Rk_temp @ gamma_prior @ Rk_temp.T + gamma_noise)
+                
 
-            # Calculate the gradient wrt d
-            dtheta = np.zeros_like(d)
-            for j in range(k * m):
-                dgamma_noise = np.zeros_like(gamma_noise)
-                dgamma_noise[j, j] = 2 * d[j]
-                dtheta[j] = np.trace(A_gamma_prior_Rk_T @ Z_k @ dgamma_noise @ Z_k @ Rk_gamma_prior_A_T)
-
-            d -= learning_rate * dtheta
-
-            if TRACK_PHI_A:
-                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
-                phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
-                print(f"Picture {i} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)} - Maximum intensity angle: {round(offset_angle_pairs[np.argmax(d)][1] * 180 / np.pi, 3)}")
+        if TRACK_PHI_A:
+            gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
+            print(f"Picture {i} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)} - Maximum intensity angle: {round(offset_angle_pairs[np.argmax(d)][1] * 180 / np.pi, 3)}")
 
         # calculate the optimal gamma_noise and Z_k for the current picture
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)

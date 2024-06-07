@@ -65,7 +65,7 @@ n = 21;
 pr = 0.33; % proportion of real sensors for
 nr = round(pr*n); % number of real sensors
 np = n-nr+1; % number of possible sensor positions
-mm = 133; % number of line integrals per sensor
+mm = 1; % number of line integrals per sensor
 nn = mm*n; % number of line integrals per projection
 m = 100; % number of projection angles
 

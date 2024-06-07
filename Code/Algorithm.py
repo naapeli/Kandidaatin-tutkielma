@@ -30,12 +30,14 @@ def run_algorithm():
 
     # define ROI
     A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
+    A = ~A
     if PLOT_ROI:
         plt.figure(figsize=(8, 6))
         contour = plt.contourf(X, Y, A, cmap='viridis')
         plt.show()
-    # reshape ROI to (1, N * N)
-    A = A.reshape(1, -1)
+    # reshape ROI to (N * N, N * N) on diagonals
+    A = A.flatten()
+    A = np.diag(A)
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
