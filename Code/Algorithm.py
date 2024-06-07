@@ -15,6 +15,7 @@ def run_algorithm():
     n = N ** 2
     k = 10 # number of angles (or X-ray images)
     m = 20 # number of sensors
+    epsilon = 1e-10
 
     # define the grid
     x = np.arange(N) / N
@@ -23,7 +24,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define the priors
-    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.1)
+    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.5) + epsilon * np.eye(n)
     x_prior = np.zeros(n)
     noise_mean = np.zeros(k * m)
 
@@ -62,12 +63,13 @@ def run_algorithm():
 
     iter = 100
     history_phi = np.zeros(iter)
-    epsilon = 1e-10
     learning_rate = 0.01
+    rng = np.random.default_rng(0)
     for i in range(iter):
-        gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)        
+        gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
 
         # For some reason, the calculation is slower with the cholesky decomposition than using normal inverse
+        # Probably because R_k @ gamma_prior is a matrix and not a vector???
         # L = np.linalg.cholesky(Z_k)
         # Z_k_inv_times_R_k_times_gamma_prior = np.linalg.lstsq(L, R_k @ gamma_prior, rcond=None)[0]
         # Z_k_inv_times_R_k_times_gamma_prior = np.linalg.lstsq(L.T, Z_k_inv_times_R_k_times_gamma_prior, rcond=None)[0]
@@ -80,8 +82,9 @@ def run_algorithm():
 
         # calculate the measurement
         if MEASUREMENT:
-            sample_x = np.random.multivariate_normal(x_prior, gamma_prior)
-            sample_noise = np.random.multivariate_normal(noise_mean, gamma_noise)
+            # using method = "cholesky" is very important to make this run faster!
+            sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
+            sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
             sample_y = R_k @ sample_x + sample_noise
 
             x_posterior = x_prior - gamma_prior_R_k_T_Z_k @ (sample_y - R_k @ x_prior)
