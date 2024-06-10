@@ -7,14 +7,17 @@ from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
 def run_algorithm():
-    PLOT_ROI = True
+    PLOT_ROI = False
     CALCULATE_PROJECTION_MATRICIES = True
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
-    PLOT_POSTERIOR = True
+    PLOT_COVARIANCE = False
+    PLOT_VARIANCE = True
+    PLOT_ROI_RECONSTRUCTION = False
+    PLOT_ANGLE_TARGET = True
 
     N = 30 # pixels per edge
     n = N ** 2
-    k = 8 # number of angles (or X-ray images)
+    k = 10 # number of angles (or X-ray images)
     mm = 1 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
@@ -53,7 +56,7 @@ def run_algorithm():
             R_k: csr_array = load_npz("Code/Projection_matrix.npz")
         except:
             print("Loading projection matricies failed! Recalculation started.")
-            offsets = np.linspace(-0.49, 0.49, m)
+            offsets = np.linspace(-0.25, 0.25, m)
             angles = np.linspace(-np.pi / 2, np.pi / 2, k)
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
@@ -61,14 +64,14 @@ def run_algorithm():
     offset_angle_pairs = np.vstack([x.ravel(), y.ravel()]).T
     
     # define initial parameters d and the limit D
-    d = np.random.uniform(size=(k * m,))
+    d = np.random.uniform(1, 2, size=(k * m,))
     D = 1
     # make sure d satisfies the boundary condition
-    d = 2 * d * np.sqrt(np.sum(1 / (d ** 2)) / D)
+    d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
     # initialise parameters for algorithm
-    learning_rate = 10
-    iter_per_picture = 20
+    learning_rate = 100
+    iter_per_picture = 10
     rng = np.random.default_rng(0)
     number_of_pictures = 10
 
@@ -80,23 +83,29 @@ def run_algorithm():
 
         # find optimal d on this picture with gradient descent
         for l in range(iter_per_picture):
-            print(l, iter_per_picture)
+            print(l + 1, iter_per_picture)
             gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
             Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
 
             # Calculate the gradient wrt d
+            A_gamma_prior_Rk_T_Zk = A_gamma_prior_Rk_T @ Z_k
+            Zk_Rk_gamma_prior_A_T = Z_k @ Rk_gamma_prior_A_T
+
             dtheta = np.zeros_like(d)
             for j in range(k * m):
                 dgamma_noise = np.zeros_like(gamma_noise)
                 dgamma_noise[j, j] = 2 * d[j]
-                dtheta[j] = np.trace(A_gamma_prior_Rk_T @ Z_k @ dgamma_noise @ Z_k @ Rk_gamma_prior_A_T)
+                dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
+            print(d)
+            print(dtheta)
+            print(np.linalg.norm(dtheta))
             d -= learning_rate * dtheta
 
-            if TRACK_PHI_A:
-                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
-                phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
-                print(f"Picture {i} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)} - Maximum intensity angle: {round(offset_angle_pairs[np.argmax(d)][1] * 180 / np.pi, 3)}")
+        if TRACK_PHI_A:
+            gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
+            print(f"Picture {i} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)} - Maximum intensity angle: {round(offset_angle_pairs[np.argmax(d)][1] * 180 / np.pi, 3)}")
 
         # calculate the optimal gamma_noise and Z_k for the current picture
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
@@ -117,14 +126,20 @@ def run_algorithm():
         x_prior = x_posterior
 
         # plot the current recreation of the image
-        if PLOT_POSTERIOR:
+        if PLOT_COVARIANCE:
             plot_covariance(x_prior, gamma_prior, rng, N)
+        if PLOT_VARIANCE:
             plot_variance(gamma_prior, N)
+        if PLOT_ROI_RECONSTRUCTION:
+            plot_ROI(x_prior, N)
+        if PLOT_ANGLE_TARGET:
+            plot_intensity_angle(offset_angle_pairs[:, 1] * 180 / np.pi, d ** 2)
+        if PLOT_COVARIANCE or PLOT_VARIANCE or PLOT_ROI_RECONSTRUCTION or PLOT_ANGLE_TARGET:
             plt.show()
 
         # make new starting point for the next picture
-        d = np.random.uniform(size=(k * m,))
-        d = 2 * d * np.sqrt(np.sum(1 / (d ** 2)) / D)
+        d = np.random.uniform(1, 2, size=(k * m,))
+        d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
@@ -133,6 +148,7 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
     for i, ax in enumerate(axs.flat):
         im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest')
         fig.colorbar(im, ax=ax)
+    ax.set_title("Samples from covariance matrix")
 
 def plot_variance(gamma_posterior, N):
     variances = np.diag(gamma_posterior)
@@ -140,6 +156,20 @@ def plot_variance(gamma_posterior, N):
     fig, ax = plt.subplots()
     im = ax.imshow(variances, cmap='viridis', interpolation='nearest')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
+    ax.set_title("ROI reconstruction??? variance")
+
+def plot_ROI(x_prior, N):
+    fig, ax = plt.subplots()
+    im = ax.imshow(x_prior.reshape(N, N))
+    fig.colorbar(im, ax=ax)
+    ax.set_title("ROI reconstruction??? x_prior")
+
+def plot_intensity_angle(angles, d):
+    fig, ax = plt.subplots()
+    ax.plot(angles, d, ".")
+    ax.set_title("Angle intensity plot")
+    ax.set_ylabel("Intensity d")
+    ax.set_xlabel("Angles")
 
 
 run_algorithm()

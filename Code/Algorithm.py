@@ -11,7 +11,7 @@ def run_algorithm():
     CALCULATE_PROJECTION_MATRICIES = True
     MEASUREMENT = True
 
-    N = 49 # pixels per edge
+    N = 30 # pixels per edge
     n = N ** 2
     k = 10 # number of angles (or X-ray images)
     m = 20 # number of sensors
@@ -46,7 +46,6 @@ def run_algorithm():
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, 1)
         print("Calculation finished")
-        # print(R_k.todense())
     else:
         try:
             R_k: csr_array = load_npz("Code/Projection_matrix.npz")
@@ -57,7 +56,7 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = np.random.uniform(size=(k * m,))
+    d = np.random.uniform(1, 2, size=(k * m,))
     # d = np.ones(shape=(k * m,))
     D = 1
     # make sure d satisfies the boundary condition
@@ -98,12 +97,16 @@ def run_algorithm():
         history_phi[i] = phi_A_d
         # could use cholesky decomposition for calculating Z_k_inv as in matlab code, but we already calculated it above
 
+        # some helpers
+        A_gamma_prior_R_k_T_Z_k = A @ gamma_prior_R_k_T_Z_k
+        Z_k_R_k_gamma_prior_A_T = Z_k @ R_k_gamma_prior @ A.T
+
         # Calculate the gradient wrt d
         dtheta = np.zeros_like(d)
         for j in range(k * m):
             dgamma_noise = np.zeros_like(gamma_noise)
             dgamma_noise[j, j] = 2 * d[j]
-            dtheta[j] = np.trace(A @ gamma_prior_R_k_T_Z_k @ dgamma_noise @ Z_k @ R_k_gamma_prior @ A.T)
+            dtheta[j] = np.trace(A_gamma_prior_R_k_T_Z_k @ dgamma_noise @ Z_k_R_k_gamma_prior_A_T)
 
         d -= learning_rate * dtheta
         print(f"{i}. - Modified A-optimality target function: {phi_A_d} - Radiation boundary satisfied: {np.sum(1 / (d ** 2)) <= D} - Dose of radiation: {np.sum(1 / (d ** 2))}")
