@@ -14,7 +14,8 @@ h = 0.01
 
 A = np.zeros((l, l))
 A[1:10, 0:20] = 1
-A = A.reshape(1, -1)
+A = A.reshape(-1)
+A = np.diag(A)
 R_k = np.random.normal(0, 1, size=(k * m, n))
 gamma_prior = np.random.normal(0, 1, size=(n, n))
 d = np.random.normal(0, 1, size=(m * k))
