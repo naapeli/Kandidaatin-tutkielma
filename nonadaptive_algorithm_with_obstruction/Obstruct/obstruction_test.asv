@@ -59,15 +59,15 @@ pauseko = false; % wheather there is a pause between the optimization rounds
 %n = 45; % total number of virtual sensors
 
 % For testing
-N = 49;
-n = 21;
+N = 30;
+n = 20;
 
 pr = 0.33; % proportion of real sensors for
 nr = round(pr*n); % number of real sensors
 np = n-nr+1; % number of possible sensor positions
-mm = 1; % number of line integrals per sensor
+mm = 2; % number of line integrals per sensor
 nn = mm*n; % number of line integrals per projection
-m = 100; % number of projection angles
+m = 10; % number of projection angles
 
 n_dir = 10; % number of sequentially optimized directions is n_dir
 sigma = 0.01; % standard deviation of noise

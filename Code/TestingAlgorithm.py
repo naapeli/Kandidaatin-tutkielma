@@ -7,17 +7,16 @@ from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
 def run_algorithm():
-    PLOT_ROI = True
-    CALCULATE_PROJECTION_MATRICIES = True
-    TRACK_PHI_A = True  # track the target function on every picture during gradient descent
-    PLOT_COVARIANCE = True
-    PLOT_VARIANCE = True
-    PLOT_ROI_RECONSTRUCTION = True
-    PLOT_D = True
+    PLOT_ROI = False
+    CALCULATE_PROJECTION_MATRICIES = True # calculate the x ray matrix again or read from memory
+    TRACK_PHI_A = True # track the target function on every picture during gradient descent
+    PLOT_COVARIANCE = False # Take 4 samples from the posterior covariance matrix
+    PLOT_STD = True # Reconstruct the image based on the standard deviations
+    PLOT_D = True # plot the vector d as a function of it's indicies
 
-    N = 30 # pixels per edge
+    N = 25 # pixels per edge
     n = N ** 2
-    k = 10 # number of angles (or X-ray images)
+    k = 8 # number of angles (or X-ray images)
     mm = 1 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
@@ -43,12 +42,13 @@ def run_algorithm():
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
     A = A.flatten(order="F")
     A = csr_array(np.diag(A))
-    # A = csr_array(np.eye(n))
+    A = csr_array(np.eye(n))
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
         offsets = np.linspace(-0.49, 0.49, m * mm)
-        angles = np.linspace(-np.pi / 2, np.pi / 2, k)
+        # angles = np.linspace(-np.pi / 2, np.pi / 2, k)
+        angles = np.linspace(np.pi / (2 * k), np.pi - np.pi / (2 * k), k)
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, mm)
         print("Calculation finished")
@@ -61,12 +61,9 @@ def run_algorithm():
             angles = np.linspace(-np.pi / 2, np.pi / 2, k)
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
-    x, y = np.meshgrid(offsets, angles)
-    offset_angle_pairs = np.vstack([x.ravel(), y.ravel()]).T
-    
     # define initial parameters d and the limit D
     d = 0.1 * np.ones(shape=(k * m,))
-    D = 1
+    D = 22000
     # make sure d satisfies the boundary condition
     # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
@@ -74,7 +71,7 @@ def run_algorithm():
     learning_rate = 0.0001
     iter_per_picture = 10
     rng = np.random.default_rng(0)
-    number_of_pictures = 10
+    number_of_pictures = 5
 
     for i in range(number_of_pictures):
         # calculate helper matricies that remain the same during the gradient descent
@@ -84,7 +81,6 @@ def run_algorithm():
 
         # find optimal d on this picture with gradient descent
         for l in range(iter_per_picture):
-            print(l + 1, iter_per_picture)
             gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
             Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
 
@@ -99,12 +95,39 @@ def run_algorithm():
                 dgamma_noise = csr_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=gamma_noise.shape)
                 dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
-            d -= learning_rate * dtheta
+            # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
+            const = 0.01
+            derivative = dtheta - const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+            # derivative = dtheta
+            # d -= learning_rate * derivative
+            
+            # use uniform line search to update d
+            max_length = 2
+            n_test_points = 10
+            t_grid = np.linspace(0, max_length, n_test_points)
+            min_value = float("inf")
+            optimal_d = d
+            Z_k_optimal = Z_k
+            for t in t_grid:
+                new_d = d - t * learning_rate * derivative
+                if np.sum(1 / (new_d ** 2)) >= D:
+                    break
+                # calculate the value of the target function and barrier at new_d
+                gamma_noise = np.diag(new_d ** 2) + epsilon * np.eye(k * m)
+                Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+                value = np.trace(A @ gamma_posterior @ A.T) - const * np.log(D - np.sum(1 / d ** 2))
+                if value < min_value:
+                    optimal_d = new_d
+                    min_value = value
+                    Z_k_optimal = Z_k
+            # optimal_d is the new chosen point
+            d = optimal_d
 
-        if TRACK_PHI_A:
-            gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
-            phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
-            print(f"Picture {i} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)} - Maximum intensity angle: {round(offset_angle_pairs[np.argmax(d)][1] * 180 / np.pi, 3)}")
+            if TRACK_PHI_A:
+                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k_optimal @ R_k @ gamma_prior
+                phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
+                print(f"Picture {i} - Iteration {l + 1} / {iter_per_picture} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)}")
 
         # calculate the optimal gamma_noise and Z_k for the current picture
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
@@ -127,11 +150,11 @@ def run_algorithm():
         # plot the current recreation of the image
         if PLOT_COVARIANCE:
             plot_covariance(x_prior, gamma_prior, rng, N)
-        if PLOT_VARIANCE:
-            plot_variance(gamma_prior, N)
+        if PLOT_STD:
+            plot_std(gamma_prior, N)
         if PLOT_D:
             plot_d(d)
-        if PLOT_COVARIANCE or PLOT_VARIANCE or PLOT_ROI_RECONSTRUCTION or PLOT_D:
+        if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
 
         # make new starting point for the next picture
@@ -147,8 +170,8 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
         fig.colorbar(im, ax=ax)
     fig.suptitle("Samples from covariance matrix")
 
-def plot_variance(gamma_posterior, N):
-    variances = np.diag(gamma_posterior)
+def plot_std(gamma_posterior, N):
+    variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N)
     fig, ax = plt.subplots()
     im = ax.imshow(variances, cmap='viridis', interpolation='nearest', vmin=0, vmax=1)
