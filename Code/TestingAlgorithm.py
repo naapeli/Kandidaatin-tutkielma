@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.sparse import csr_array, load_npz
+from scipy.sparse import csr_array, load_npz, save_npz
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
@@ -13,14 +13,18 @@ def run_algorithm():
     PLOT_COVARIANCE = False # Take 4 samples from the posterior covariance matrix
     PLOT_STD = True # Reconstruct the image based on the standard deviations
     PLOT_D = True # plot the vector d as a function of it's indicies
+    PLOT_D_IN_SAME_PICTURE = False
 
     N = 25 # pixels per edge
     n = N ** 2
-    k = 10 # number of angles (or X-ray images)
-    mm = 1 # number of rays per sensor
+    k = 4 # number of angles (or X-ray images)
+    mm = 10 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
     barrier_const = 0.01
+    # uniform line search parameters
+    max_length = 2
+    n_test_points = 10
 
     # define the grid
     # x = np.arange(N) / N
@@ -36,7 +40,6 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    # A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
     A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
@@ -50,9 +53,10 @@ def run_algorithm():
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
         offsets = np.linspace(-0.49, 0.49, m * mm)
-        angles = np.linspace(-np.pi / 2, np.pi / 2, k)
+        angles = np.linspace(-np.pi / 2, np.pi / 2 - np.pi / k, k)
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, mm)
+        save_npz("Code/Projection_matrix.npz", R_k)
         print("Calculation finished")
     else:
         try:
@@ -65,25 +69,25 @@ def run_algorithm():
     
     # define initial parameters d and the limit D
     d = 0.1 * np.ones(shape=(k * m,))
-    D = 22000
+    D = 2200000
     # make sure d satisfies the boundary condition
     # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
     # initialise parameters for algorithm
-    # learning_rate = 0.0001
-    learning_rate = 0.001
-    iter_per_picture = 10
+    learning_rate = 0.0001
+    # learning_rate = 0.001
+    iter_per_round = 10
     rng = np.random.default_rng(0)
-    number_of_pictures = 5
+    number_of_rounds = 5
 
-    for i in range(number_of_pictures):
+    for i in range(number_of_rounds):
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
         A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
         Rk_gamma_prior_A_T = R_k @ gamma_prior @ A.T
 
         # find optimal d on this picture with gradient descent
-        for l in range(iter_per_picture):
+        for l in range(iter_per_round):
             gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
             Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
 
@@ -105,13 +109,11 @@ def run_algorithm():
             # d -= learning_rate * derivative
             
             # use uniform line search to update d
-            max_length = 2
-            n_test_points = 10
-            t_grid = np.linspace(0, max_length, n_test_points)
-            min_value = float("inf")
+            t_uniform = np.linspace(0, max_length, n_test_points)
+            min_value = np.inf
             optimal_d = d
             Z_k_optimal = Z_k
-            for t in t_grid:
+            for t in t_uniform:
                 new_d = d - t * learning_rate * derivative
                 if np.sum(1 / (new_d ** 2)) >= D:
                     break
@@ -130,7 +132,7 @@ def run_algorithm():
             if TRACK_PHI_A:
                 gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k_optimal @ R_k @ gamma_prior
                 phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
-                print(f"Picture {i} - Iteration {l + 1} / {iter_per_picture} - Modified A-optimality target function: {round(phi_A_d, 6)} - Dose of radiation: {round(np.sum(1 / (d ** 2)), 3)}")
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
 
         # calculate the optimal gamma_noise and Z_k for the current picture
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
@@ -150,19 +152,28 @@ def run_algorithm():
         x_posterior = x_prior - gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
         x_prior = x_posterior
 
-        # plot the current recreation of the image
+        # plot the current recreation of the ROI and other debugging features
+        if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
+            plt.plot(d, label=i+1)
         if PLOT_COVARIANCE:
             plot_covariance(x_prior, gamma_prior, rng, N)
         if PLOT_STD:
             plot_std(gamma_prior, N)
         if PLOT_D:
-            plot_d(d)
+            plot_d(d, k, m)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
 
         # make new starting point for the next picture
         # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
         d = 0.1 * np.ones(shape=(k * m,))
+    
+    if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
+        vertical_line_indicies = np.arange(1, k) * m
+        for x_coord in vertical_line_indicies:
+            plt.axvline(x=x_coord, color='r', linestyle='--', alpha=0.5)
+        plt.legend()
+        plt.show()
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
@@ -181,9 +192,12 @@ def plot_std(gamma_posterior, N):
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
-def plot_d(d):
+def plot_d(d, k, m):
     fig, ax = plt.subplots()
     ax.plot(d)
+    vertical_line_indicies = np.arange(1, k) * m
+    for x_coord in vertical_line_indicies:
+        ax.axvline(x=x_coord, color='r', linestyle='--', alpha=0.3)
 
 
 run_algorithm()

@@ -5,6 +5,7 @@ from time import perf_counter
 
 def get_projection_matricies(offsets, angles, N, m):
     assert len(offsets) % m == 0, "The number of offsets len(offsets) must be divisible by the number of rays m."
+    assert m > 1, "m must be greater than 1."
     x, y = np.meshgrid(offsets, angles)
     offset_angle_pairs = np.vstack([x.ravel(), y.ravel()]).T
 
@@ -49,15 +50,13 @@ def get_projection_matricies(offsets, angles, N, m):
         indy = np.ceil(N * (1 - ymids))
 
         # array slicing and updating Temp takes the most amount of time
-        if m > 1:
-            Temp[(indx - 1) * N + indy - 1, k % (m - 1)] = lengths
+        Temp[(indx - 1) * N + indy - 1, k % (m - 1)] = lengths
 
-            if k % m == 0:
-                kk = (k // m) - 1
-                A[kk] = Temp.sum(axis=1) / m
-                Temp = lil_array(np.zeros(shape=(N * N, m)))
-        elif m == 1:
-            A[k - 1, (indx - 1) * N + indy - 1] = lengths
+        if k % m == 0:
+            kk = (k // m) - 1
+            A[kk] = Temp.sum(axis=1) / m
+            Temp = lil_array(np.zeros(shape=(N * N, m)))
+            
         if k % 5000 == 0:
             print(k, len(offset_angle_pairs))
     # return sparse matrix of the csr format for efficient row operations and saving
