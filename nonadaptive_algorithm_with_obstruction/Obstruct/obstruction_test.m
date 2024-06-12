@@ -79,6 +79,7 @@ phi = pi/(2*m):pi/m:pi-pi/(2*m); % the projection angles
 % form the prior covariance
 y = linspace(-0.5,0.5,N); % 
 [Y1,Y2] = meshgrid(y,y); % spatial grid over the unit square
+display(y)
 
 % The last components of the following vectors are ignored "if
 % roi_bg_correl". The values for OBST are a relic from a previous version,
@@ -92,7 +93,7 @@ expt = [1 0 1]; % expectations for the constant absorption in different regions:
 %% Determine ROI, OBST and background, as well as their prior covariances
 
 % Choose the geometry
-regions = 2;
+regions = 1;
 
 switch regions
     case 0 

@@ -1,13 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.sparse import csr_array, load_npz
+from numba import jit
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
-def run_algorithm():
-    PLOT_ROI = False
+@jit(nopython=True)
+def run_algorithm(roi: csr_array):
+    PLOT_ROI = True
     CALCULATE_PROJECTION_MATRICIES = True # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True # track the target function on every picture during gradient descent
     PLOT_COVARIANCE = False # Take 4 samples from the posterior covariance matrix
@@ -16,14 +18,16 @@ def run_algorithm():
 
     N = 25 # pixels per edge
     n = N ** 2
-    k = 8 # number of angles (or X-ray images)
+    k = 4 # number of angles (or X-ray images)
     mm = 1 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
 
     # define the grid
-    x = np.arange(N) / N
-    y = np.arange(N) / N
+    # x = np.arange(N) / N
+    x = np.linspace(-0.5, 0.5, N)
+    # y = np.arange(N) / N
+    y = np.linspace(-0.5, 0.5, N)
     X, Y = np.meshgrid(x, y)
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
@@ -33,28 +37,27 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
-    # A = ~A
+    # A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
+    A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest')
         plt.colorbar()
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
-    A = A.flatten(order="F")
-    A = csr_array(np.diag(A))
-    A = csr_array(np.eye(n))
+    A = A.flatten(order="F") # this is correct!!!
+    A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
+    # A = csr_array(np.eye(n))
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
         offsets = np.linspace(-0.49, 0.49, m * mm)
-        # angles = np.linspace(-np.pi / 2, np.pi / 2, k)
-        angles = np.linspace(np.pi / (2 * k), np.pi - np.pi / (2 * k), k)
+        angles = np.linspace(-np.pi / 2, np.pi / 2, k)
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, mm)
         print("Calculation finished")
     else:
         try:
-            R_k: csr_array = load_npz("Code/Projection_matrix.npz")
+            R_k = load_npz("Code/Projection_matrix.npz")
         except:
             print("Loading projection matricies failed! Recalculation started.")
             offsets = np.linspace(-0.49, 0.49, m)
@@ -63,7 +66,7 @@ def run_algorithm():
     
     # define initial parameters d and the limit D
     d = 0.1 * np.ones(shape=(k * m,))
-    D = 22000
+    D = 10000
     # make sure d satisfies the boundary condition
     # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
@@ -90,14 +93,14 @@ def run_algorithm():
 
             dtheta = np.zeros_like(d)
             for j in range(k * m):
-                # dgamma_noise = np.zeros_like(gamma_noise)
-                # dgamma_noise[j, j] = 2 * d[j]
-                dgamma_noise = csr_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=gamma_noise.shape)
+                dgamma_noise = np.zeros_like(gamma_noise)
+                dgamma_noise[j, j] = 2 * d[j]
                 dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
             # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
             const = 0.01
-            derivative = dtheta - const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+            dbarrier = const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+            derivative = dtheta - dbarrier
             # derivative = dtheta
             # d -= learning_rate * derivative
             
