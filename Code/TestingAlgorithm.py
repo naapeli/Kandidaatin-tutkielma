@@ -1,14 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.sparse import csr_array, load_npz
-from numba import jit
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
-@jit(nopython=True)
-def run_algorithm(roi: csr_array):
+def run_algorithm():
     PLOT_ROI = True
     CALCULATE_PROJECTION_MATRICIES = True # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True # track the target function on every picture during gradient descent
@@ -18,10 +16,11 @@ def run_algorithm(roi: csr_array):
 
     N = 25 # pixels per edge
     n = N ** 2
-    k = 4 # number of angles (or X-ray images)
+    k = 10 # number of angles (or X-ray images)
     mm = 1 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
+    barrier_const = 0.01
 
     # define the grid
     # x = np.arange(N) / N
@@ -40,7 +39,7 @@ def run_algorithm(roi: csr_array):
     # A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
     A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
     if PLOT_ROI:
-        plt.imshow(A, cmap='viridis', interpolation='nearest')
+        plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
         plt.colorbar()
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
@@ -57,7 +56,7 @@ def run_algorithm(roi: csr_array):
         print("Calculation finished")
     else:
         try:
-            R_k = load_npz("Code/Projection_matrix.npz")
+            R_k: csr_array = load_npz("Code/Projection_matrix.npz")
         except:
             print("Loading projection matricies failed! Recalculation started.")
             offsets = np.linspace(-0.49, 0.49, m)
@@ -66,12 +65,13 @@ def run_algorithm(roi: csr_array):
     
     # define initial parameters d and the limit D
     d = 0.1 * np.ones(shape=(k * m,))
-    D = 10000
+    D = 22000
     # make sure d satisfies the boundary condition
     # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
     # initialise parameters for algorithm
-    learning_rate = 0.0001
+    # learning_rate = 0.0001
+    learning_rate = 0.001
     iter_per_picture = 10
     rng = np.random.default_rng(0)
     number_of_pictures = 5
@@ -93,13 +93,13 @@ def run_algorithm(roi: csr_array):
 
             dtheta = np.zeros_like(d)
             for j in range(k * m):
-                dgamma_noise = np.zeros_like(gamma_noise)
-                dgamma_noise[j, j] = 2 * d[j]
+                # dgamma_noise = np.zeros_like(gamma_noise)
+                # dgamma_noise[j, j] = 2 * d[j]
+                dgamma_noise = csr_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=gamma_noise.shape)
                 dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
             # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
-            const = 0.01
-            dbarrier = const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+            dbarrier = barrier_const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
             derivative = dtheta - dbarrier
             # derivative = dtheta
             # d -= learning_rate * derivative
@@ -119,7 +119,7 @@ def run_algorithm(roi: csr_array):
                 gamma_noise = np.diag(new_d ** 2) + epsilon * np.eye(k * m)
                 Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
                 gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
-                value = np.trace(A @ gamma_posterior @ A.T) - const * np.log(D - np.sum(1 / d ** 2))
+                value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
                 if value < min_value:
                     optimal_d = new_d
                     min_value = value
@@ -169,7 +169,7 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = sample_x.reshape(4, N, N)
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
     for i, ax in enumerate(axs.flat):
-        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest')
+        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
         fig.colorbar(im, ax=ax)
     fig.suptitle("Samples from covariance matrix")
 
@@ -177,7 +177,7 @@ def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N)
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', vmin=0, vmax=1)
+    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', vmin=0, vmax=1, origin='lower')
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
