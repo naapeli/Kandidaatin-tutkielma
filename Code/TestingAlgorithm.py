@@ -17,11 +17,11 @@ def run_algorithm():
 
     N = 25 # pixels per edge
     n = N ** 2
-    k = 4 # number of angles (or X-ray images)
+    k = 8 # number of angles (or X-ray images)
     mm = 10 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
-    barrier_const = 0.01
+    barrier_const = 0.00001
     # uniform line search parameters
     max_length = 2
     n_test_points = 10
@@ -40,7 +40,14 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+    ROI = 2
+    if ROI == 0:
+        A = np.ones((N, N))
+    elif ROI == 1:
+        A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+    elif ROI == 2:
+        A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
+    
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
         plt.colorbar()
@@ -48,7 +55,8 @@ def run_algorithm():
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
     A = A.flatten(order="F") # this is correct!!!
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
-    # A = csr_array(np.eye(n))
+        
+
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
@@ -68,17 +76,15 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = 0.1 * np.ones(shape=(k * m,))
+    d = 0.5 * np.ones(shape=(k * m,))
     D = 2200000
     # make sure d satisfies the boundary condition
-    # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
     # initialise parameters for algorithm
-    learning_rate = 0.0001
-    # learning_rate = 0.001
+    learning_rate = 0.01
     iter_per_round = 10
     rng = np.random.default_rng(0)
-    number_of_rounds = 5
+    number_of_rounds = 20
 
     for i in range(number_of_rounds):
         # calculate helper matricies that remain the same during the gradient descent
@@ -105,8 +111,6 @@ def run_algorithm():
             # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
             dbarrier = barrier_const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
             derivative = dtheta - dbarrier
-            # derivative = dtheta
-            # d -= learning_rate * derivative
             
             # use uniform line search to update d
             t_uniform = np.linspace(0, max_length, n_test_points)
@@ -163,10 +167,6 @@ def run_algorithm():
             plot_d(d, k, m)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
-
-        # make new starting point for the next picture
-        # d = d * np.sqrt(np.sum(1 / (d ** 2)) / D)
-        d = 0.1 * np.ones(shape=(k * m,))
     
     if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
         vertical_line_indicies = np.arange(1, k) * m
@@ -177,7 +177,7 @@ def run_algorithm():
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
-    sample_x = sample_x.reshape(4, N, N)
+    sample_x = sample_x.reshape(4, N, N, order='F')
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
     for i, ax in enumerate(axs.flat):
         im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
@@ -186,9 +186,9 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
 
 def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
-    variances = variances.reshape(N, N)
+    variances = variances.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', vmin=0, vmax=1, origin='lower')
+    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
