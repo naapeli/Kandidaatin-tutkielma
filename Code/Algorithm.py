@@ -1,50 +1,70 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.sparse import csr_array, load_npz
+from scipy.sparse import csr_array, load_npz, save_npz
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
 def run_algorithm():
-    PLOT_ROI = False
-    CALCULATE_PROJECTION_MATRICIES = True
-    MEASUREMENT = True
+    PLOT_ROI = True
+    CALCULATE_PROJECTION_MATRICIES = True # calculate the x ray matrix again or read from memory
+    TRACK_PHI_A = True # track the target function on every picture during gradient descent
+    PLOT_COVARIANCE = False # Take 4 samples from the posterior covariance matrix
+    PLOT_STD = True # Reconstruct the image based on the standard deviations
+    PLOT_D = True # plot the vector d as a function of it's indicies
+    PLOT_D_IN_SAME_PICTURE = False
 
-    N = 30 # pixels per edge
+    N = 25 # pixels per edge
     n = N ** 2
-    k = 10 # number of angles (or X-ray images)
+    k = 8 # number of angles (or X-ray images)
+    mm = 10 # number of rays per sensor
     m = 20 # number of sensors
     epsilon = 1e-10
+    barrier_const = 0.00001
+    # uniform line search parameters
+    max_length = 2
+    n_test_points = 10
 
     # define the grid
-    x = np.arange(N) / N
-    y = np.arange(N) / N
+    # x = np.arange(N) / N
+    x = np.linspace(-0.5, 0.5, N)
+    # y = np.arange(N) / N
+    y = np.linspace(-0.5, 0.5, N)
     X, Y = np.meshgrid(x, y)
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define the priors
-    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.5) + epsilon * np.eye(n)
+    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.05) + epsilon * np.eye(n)
     x_prior = np.zeros(n)
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    A = (X - 0.3) ** 2 + (Y - 0.4) ** 2 < 0.25 ** 2
-    A = ~A
+    ROI = 2
+    if ROI == 0:
+        A = np.ones((N, N))
+    elif ROI == 1:
+        A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+    elif ROI == 2:
+        A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
+    
     if PLOT_ROI:
-        plt.figure(figsize=(8, 6))
-        contour = plt.contourf(X, Y, A, cmap='viridis')
+        plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.colorbar()
         plt.show()
-    # reshape ROI to (N * N, N * N) on diagonals
-    A = A.flatten()
-    A = np.diag(A)
+    # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
+    A = A.flatten(order="F") # this is correct!!!
+    A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
+        
+
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
-        offsets = np.linspace(-0.49, 0.49, m)
-        angles = np.linspace(-np.pi / 2, np.pi / 2, k)
+        offsets = np.linspace(-0.49, 0.49, m * mm)
+        angles = np.linspace(-np.pi / 2, np.pi / 2 - np.pi / k, k)
         print("Starting to calculate projection matricies")
-        R_k = get_projection_matricies(offsets, angles, N, 1)
+        R_k = get_projection_matricies(offsets, angles, N, mm)
+        save_npz("Code/Projection_matrix.npz", R_k)
         print("Calculation finished")
     else:
         try:
@@ -56,62 +76,128 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = np.random.uniform(1, 2, size=(k * m,))
-    # d = np.ones(shape=(k * m,))
-    D = 1
+    d = 0.5 * np.ones(shape=(k * m,))
+    D = 2200000
     # make sure d satisfies the boundary condition
-    d = 2 * d * np.sqrt(np.sum(1 / (d ** 2)) / D)
 
-    iter = 100
-    history_phi = np.zeros(iter)
+    # initialise parameters for algorithm
     learning_rate = 0.01
+    iter_per_round = 10
     rng = np.random.default_rng(0)
-    for i in range(iter):
+    number_of_rounds = 20
+
+    for i in range(number_of_rounds):
+        # calculate helper matricies that remain the same during the gradient descent
+        Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
+        A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
+        Rk_gamma_prior_A_T = R_k @ gamma_prior @ A.T
+
+        # find optimal d on this picture with gradient descent
+        for l in range(iter_per_round):
+            gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
+            Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+
+            # Calculate the gradient wrt d
+            A_gamma_prior_Rk_T_Zk = A_gamma_prior_Rk_T @ Z_k
+            Zk_Rk_gamma_prior_A_T = Z_k @ Rk_gamma_prior_A_T
+
+            dtheta = np.zeros_like(d)
+            for j in range(k * m):
+                # dgamma_noise = np.zeros_like(gamma_noise)
+                # dgamma_noise[j, j] = 2 * d[j]
+                dgamma_noise = csr_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=gamma_noise.shape)
+                dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
+
+            # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
+            dbarrier = barrier_const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+            derivative = dtheta - dbarrier
+            
+            # use uniform line search to update d
+            t_uniform = np.linspace(0, max_length, n_test_points)
+            min_value = np.inf
+            optimal_d = d
+            Z_k_optimal = Z_k
+            for t in t_uniform:
+                new_d = d - t * learning_rate * derivative
+                if np.sum(1 / (new_d ** 2)) >= D:
+                    break
+                # calculate the value of the target function and barrier at new_d
+                gamma_noise = np.diag(new_d ** 2) + epsilon * np.eye(k * m)
+                Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+                value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+                if value < min_value:
+                    optimal_d = new_d
+                    min_value = value
+                    Z_k_optimal = Z_k
+            # optimal_d is the new chosen point
+            d = optimal_d
+
+            if TRACK_PHI_A:
+                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k_optimal @ R_k @ gamma_prior
+                phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
+
+        # calculate the optimal gamma_noise and Z_k for the current picture
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
+        Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
 
-        # For some reason, the calculation is slower with the cholesky decomposition than using normal inverse
-        # Probably because R_k @ gamma_prior is a matrix and not a vector???
-        # L = np.linalg.cholesky(Z_k)
-        # Z_k_inv_times_R_k_times_gamma_prior = np.linalg.lstsq(L, R_k @ gamma_prior, rcond=None)[0]
-        # Z_k_inv_times_R_k_times_gamma_prior = np.linalg.lstsq(L.T, Z_k_inv_times_R_k_times_gamma_prior, rcond=None)[0]
-        # gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k_inv_times_R_k_times_gamma_prior
-
-        Z_k = np.linalg.inv(R_k @ gamma_prior @ R_k.T + gamma_noise) # invB in matlab
-        R_k_gamma_prior = R_k @ gamma_prior
-        gamma_prior_R_k_T_Z_k = gamma_prior @ R_k.T @ Z_k
-        gamma_posterior = gamma_prior - gamma_prior_R_k_T_Z_k @ R_k_gamma_prior
+        # update gamma_prior after finding optimal d
+        gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+        gamma_prior = gamma_posterior
 
         # calculate the measurement
-        if MEASUREMENT:
-            # using method = "cholesky" is very important to make this run faster!
-            sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
-            sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
-            sample_y = R_k @ sample_x + sample_noise
+        # using method = "cholesky" is very important to make this run faster!
+        sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
+        sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
+        sample_y = R_k @ sample_x + sample_noise
 
-            x_posterior = x_prior - gamma_prior_R_k_T_Z_k @ (sample_y - R_k @ x_prior)
-            x_prior = x_posterior
+        # calculate the new x_prior
+        x_posterior = x_prior - gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
+        x_prior = x_posterior
 
-        # calculate the value of phi_A(d) to keep track of it
-        phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
-        # modified A-optimality target
-        history_phi[i] = phi_A_d
-        # could use cholesky decomposition for calculating Z_k_inv as in matlab code, but we already calculated it above
+        # plot the current recreation of the ROI and other debugging features
+        if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
+            plt.plot(d, label=i+1)
+        if PLOT_COVARIANCE:
+            plot_covariance(x_prior, gamma_prior, rng, N)
+        if PLOT_STD:
+            plot_std(gamma_prior, N)
+        if PLOT_D:
+            plot_d(d, k, m)
+        if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
+            plt.show()
+    
+    if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
+        vertical_line_indicies = np.arange(1, k) * m
+        for x_coord in vertical_line_indicies:
+            plt.axvline(x=x_coord, color='r', linestyle='--', alpha=0.5)
+        plt.legend()
+        plt.show()
 
-        # some helpers
-        A_gamma_prior_R_k_T_Z_k = A @ gamma_prior_R_k_T_Z_k
-        Z_k_R_k_gamma_prior_A_T = Z_k @ R_k_gamma_prior @ A.T
+def plot_covariance(x_prior, gamma_posterior, rng, N):
+    sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
+    sample_x = sample_x.reshape(4, N, N, order='F')
+    fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+    for i, ax in enumerate(axs.flat):
+        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
+        fig.colorbar(im, ax=ax)
+    fig.suptitle("Samples from covariance matrix")
 
-        # Calculate the gradient wrt d
-        dtheta = np.zeros_like(d)
-        for j in range(k * m):
-            dgamma_noise = np.zeros_like(gamma_noise)
-            dgamma_noise[j, j] = 2 * d[j]
-            dtheta[j] = np.trace(A_gamma_prior_R_k_T_Z_k @ dgamma_noise @ Z_k_R_k_gamma_prior_A_T)
+def plot_std(gamma_posterior, N):
+    variances = np.sqrt(np.diag(gamma_posterior))
+    variances = variances.reshape(N, N, order='F')
+    fig, ax = plt.subplots()
+    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    fig.colorbar(im, ax=ax)
+    ax.set_title("ROI reconstruction with variance")
 
-        d -= learning_rate * dtheta
-        print(f"{i}. - Modified A-optimality target function: {phi_A_d} - Radiation boundary satisfied: {np.sum(1 / (d ** 2)) <= D} - Dose of radiation: {np.sum(1 / (d ** 2))}")
-
-        gamma_prior = gamma_posterior
+def plot_d(d, k, m):
+    fig, ax = plt.subplots()
+    ax.plot(d)
+    vertical_line_indicies = np.arange(1, k) * m
+    for x_coord in vertical_line_indicies:
+        ax.axvline(x=x_coord, color='r', linestyle='--', alpha=0.3)
 
 
 run_algorithm()
