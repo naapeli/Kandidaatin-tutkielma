@@ -116,10 +116,9 @@ def run_algorithm():
             t_uniform = np.linspace(0, max_length, n_test_points)
             min_value = np.inf
             optimal_d = d
-            Z_k_optimal = Z_k
             for t in t_uniform:
                 new_d = d - t * learning_rate * derivative
-                if np.sum(1 / (new_d ** 2)) >= D:
+                if not is_valid(new_d, D): #np.sum(1 / (new_d ** 2)) >= D:
                     break
                 # calculate the value of the target function and barrier at new_d
                 gamma_noise = np.diag(new_d ** 2) + epsilon * np.eye(k * m)
@@ -129,12 +128,66 @@ def run_algorithm():
                 if value < min_value:
                     optimal_d = new_d
                     min_value = value
-                    Z_k_optimal = Z_k
             # optimal_d is the new chosen point
             d = optimal_d
 
+            # # golden section search
+            # inv_golden_ratio = 0.618033988749895
+            # tolerance = 0.1
+            # a = d
+            # # make sure to not go over the unfeasible set
+            # t = np.linspace(0, max_length, n_test_points)
+            # for ind, t_val in enumerate(t):
+            #     b = d - t_val * learning_rate * derivative
+            #     if not is_valid(b, D):
+            #         b = d - t[ind - 1] * derivative
+            #         break
+            # lambda_k = a + (1 - inv_golden_ratio) * (b - a)
+            # mu_k = a + inv_golden_ratio * (b - a)
+            # # values at the start and end points
+            # gamma_noise = np.diag(lambda_k ** 2) + epsilon * np.eye(k * m)
+            # Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+            # gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            # lambda_k_value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+            # gamma_noise = np.diag(mu_k ** 2) + epsilon * np.eye(k * m)
+            # Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+            # gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            # mu_k_value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+
+            # while np.any(np.abs(b - a) > tolerance):
+            #     print("here")
+            #     if lambda_k_value > mu_k_value:
+            #         a = lambda_k
+            #         lambda_k = mu_k
+            #         mu_k = a + inv_golden_ratio * (b - a)
+            #         if not is_valid(mu_k, D):
+            #             print("upperbound outside of wanted region", np.sum(1 / mu_k ** 2), D)
+            #             break
+            #         # calculate value at mu_k
+            #         gamma_noise = np.diag(mu_k ** 2) + epsilon * np.eye(k * m)
+            #         Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+            #         gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            #         mu_k_value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+            #     else:
+            #         b = mu_k
+            #         mu_k = lambda_k
+            #         lambda_k = a + (1 - inv_golden_ratio) * (b - a)
+            #         if not is_valid(lambda_k, D):
+            #             print("lowerbound outside of wanted region", np.sum(1 / lambda_k ** 2), D)
+            #             break
+            #         # calculate value at lambda_k
+            #         gamma_noise = np.diag(lambda_k ** 2) + epsilon * np.eye(k * m)
+            #         Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+            #         gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
+            #         lambda_k_value = np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+            # d = (a + b) / 2
+            # if not is_valid(d, D):
+            #     print("result outside of wanted region")
+
             if TRACK_PHI_A:
-                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k_optimal @ R_k @ gamma_prior
+                gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
+                Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
+                gamma_posterior = gamma_prior - gamma_prior @ R_k.T @ Z_k @ R_k @ gamma_prior
                 phi_A_d = 1 / N * np.sqrt(np.trace(A @ gamma_posterior @ A.T))
                 print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
 
@@ -198,6 +251,9 @@ def plot_d(d, k, m):
     vertical_line_indicies = np.arange(1, k) * m
     for x_coord in vertical_line_indicies:
         ax.axvline(x=x_coord, color='r', linestyle='--', alpha=0.3)
+
+def is_valid(d, D):
+    return np.sum(1 / (d ** 2)) < D
 
 
 run_algorithm()
