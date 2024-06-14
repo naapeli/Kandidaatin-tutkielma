@@ -15,7 +15,7 @@ def run_algorithm():
     PLOT_D = True # plot the vector d as a function of it's indicies
     PLOT_D_IN_SAME_PICTURE = False
 
-    N = 25 # pixels per edge
+    N = 50 # pixels per edge
     n = N ** 2
     k = 8 # number of angles (or X-ray images)
     mm = 10 # number of rays per sensor
