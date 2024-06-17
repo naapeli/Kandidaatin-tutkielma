@@ -176,7 +176,7 @@ def run_algorithm():
                         gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
                         lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
             d = a if lambda_k_value < mu_k_value else b
-            if not is_valid(d, D):
+            if not is_valid(d, D):  # should never enter here
                 print("result outside of wanted region")
 
             if TRACK_PHI_A:
