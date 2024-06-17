@@ -119,55 +119,62 @@ def run_algorithm():
             # d = optimal_d
 
             # golden section search
+            good_solution_found = False
+            reduction = 1
             inv_golden_ratio = 0.618033988749895
             tolerance = 0.0001
-            a = d
-            # make sure to not go over the unfeasible set
-            const = 0.9
-            b = np.abs(d - max_length * learning_rate * derivative)
-            ind = 1
-            while True:
-                if is_valid(b, D):
-                    break
-                elif ind > 1000:
-                    b = d
-                    break
-                b = np.abs(d - (const ** ind) * max_length * learning_rate * derivative)
-                ind += 1
+            const = 0.5
+            while not good_solution_found:
+                # assume chosen points yield a feasible solution to the line search
+                good_solution_found = True
+                a = d
+                b = d - max_length * reduction * learning_rate * derivative
+                lambda_k = a + (1 - inv_golden_ratio) * (b - a)
+                mu_k = a + inv_golden_ratio * (b - a)
+                reduction *= const
 
-            lambda_k = a + (1 - inv_golden_ratio) * (b - a)
-            mu_k = a + inv_golden_ratio * (b - a)
-            # values at the start and end points
-            Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-            gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-            lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
-            Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-            gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-            mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                # make sure all points are feasible, otherwise move on to a shorter interval
+                if not is_valid(b, D):
+                    good_solution_found = False
+                    continue
+                if not is_valid(lambda_k, D):
+                    good_solution_found = False
+                    continue
+                if not is_valid(mu_k, D):
+                    good_solution_found = False
+                    continue
 
-            while np.any(np.abs(b - a) > tolerance):
-                if lambda_k_value > mu_k_value:
-                    a = lambda_k
-                    lambda_k = mu_k
-                    mu_k = a + inv_golden_ratio * (b - a)
-                    if not is_valid(mu_k, D):
-                        print("upperbound outside of wanted region", np.sum(1 / mu_k ** 2), D)
-                        break
-                    # calculate value at mu_k
-                    Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                    gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                    mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
-                else:
-                    b = mu_k
-                    mu_k = lambda_k
-                    lambda_k = a + (1 - inv_golden_ratio) * (b - a)
-                    if not is_valid(lambda_k, D):
-                        print("lowerbound outside of wanted region", np.sum(1 / lambda_k ** 2), D)
-                        break
-                    # calculate value at lambda_k
-                    Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                    gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                    lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                # values at the start and end points
+                Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
+                gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
+                gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
+
+                while np.any(np.abs(b - a) > tolerance):
+                    if lambda_k_value > mu_k_value:
+                        a = lambda_k
+                        lambda_k = mu_k
+                        mu_k = a + inv_golden_ratio * (b - a)
+                        if not is_valid(mu_k, D):
+                            good_solution_found = False
+                            break
+                        # calculate value at mu_k
+                        Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
+                        gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                        mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                    else:
+                        b = mu_k
+                        mu_k = lambda_k
+                        lambda_k = a + (1 - inv_golden_ratio) * (b - a)
+                        if not is_valid(lambda_k, D):
+                            good_solution_found = False
+                            break
+                        # calculate value at lambda_k
+                        Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
+                        gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                        lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
             d = a if lambda_k_value < mu_k_value else b
             if not is_valid(d, D):
                 print("result outside of wanted region")
@@ -228,7 +235,7 @@ def plot_d(d, k, m):
         ax.axvline(x=x_coord, color='r', linestyle='--', alpha=0.3)
 
 def is_valid(d, D):
-    return np.sum(1 / (d ** 2)) < D
+    return np.sum(1 / (d ** 2)) <= D
 
 def phi_A(d, gamma_posterior, A, D, barrier_const=0.00001):
     return np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
