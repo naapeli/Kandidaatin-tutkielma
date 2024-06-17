@@ -8,28 +8,26 @@ from GaussianDistanceCovariance import gaussian_distance_covariance
 
 def run_algorithm():
     PLOT_ROI = True
-    CALCULATE_PROJECTION_MATRICIES = True # calculate the x ray matrix again or read from memory
-    TRACK_PHI_A = True # track the target function on every picture during gradient descent
-    PLOT_COVARIANCE = False # Take 4 samples from the posterior covariance matrix
-    PLOT_STD = True # Reconstruct the image based on the standard deviations
-    PLOT_D = True # plot the vector d as a function of it's indicies
-    PLOT_D_IN_SAME_PICTURE = False
+    CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
+    TRACK_PHI_A = True  # track the target function on every picture during gradient descent
+    PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
+    PLOT_STD = True  # Reconstruct the image based on the standard deviations
+    PLOT_D = True  # plot the vector d as a function of it's indicies
 
-    N = 50 # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
-    k = 8 # number of angles (or X-ray images)
-    mm = 10 # number of rays per sensor
-    m = 20 # number of sensors
+    k = 8  # number of angles (or X-ray images)
+    mm = 2  # number of rays per sensor
+    m = 20  # number of sensors
     epsilon = 1e-10
+    offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
     max_length = 2
     n_test_points = 10
     barrier_const = 0.00001
 
     # define the grid
-    # x = np.arange(N) / N
     x = np.linspace(-0.5, 0.5, N)
-    # y = np.arange(N) / N
     y = np.linspace(-0.5, 0.5, N)
     X, Y = np.meshgrid(x, y)
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
@@ -60,7 +58,7 @@ def run_algorithm():
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
-        offsets = np.linspace(-0.8, 0.8, m * mm)
+        offsets = np.linspace(-offset_range, offset_range, m * mm)
         angles = np.linspace(-np.pi / 2, np.pi / 2 - np.pi / k, k)
         print("Starting to calculate projection matricies")
         R_k = get_projection_matricies(offsets, angles, N, mm)
@@ -71,7 +69,7 @@ def run_algorithm():
             R_k: csr_array = load_npz("Code/Projection_matrix.npz")
         except:
             print("Loading projection matricies failed! Recalculation started.")
-            offsets = np.linspace(-0.49, 0.49, m)
+            offsets = np.linspace(-offset_range, offset_range, m)
             angles = np.linspace(-np.pi / 2, np.pi / 2, k)
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
@@ -170,7 +168,7 @@ def run_algorithm():
                     Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                     gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
                     lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
-            d = (a + b) / 2
+            d = a if lambda_k_value < mu_k_value else b
             if not is_valid(d, D):
                 print("result outside of wanted region")
 
@@ -196,8 +194,6 @@ def run_algorithm():
         x_prior = x_posterior
 
         # plot the current recreation of the ROI and other debugging features
-        if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
-            plt.plot(d, label=i+1)
         if PLOT_COVARIANCE:
             plot_covariance(x_prior, gamma_prior, rng, N)
         if PLOT_STD:
@@ -206,13 +202,6 @@ def run_algorithm():
             plot_d(d, k, m)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
-    
-    if PLOT_D_IN_SAME_PICTURE and not (PLOT_COVARIANCE or PLOT_STD or PLOT_D):
-        vertical_line_indicies = np.arange(1, k) * m
-        for x_coord in vertical_line_indicies:
-            plt.axvline(x=x_coord, color='r', linestyle='--', alpha=0.5)
-        plt.legend()
-        plt.show()
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
