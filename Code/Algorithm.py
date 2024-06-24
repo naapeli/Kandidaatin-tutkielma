@@ -13,6 +13,7 @@ def run_algorithm():
     PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
     PLOT_STD = True  # Reconstruct the image based on the standard deviations
     PLOT_D = True  # plot the vector d as a function of it's indicies
+    PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
     N = 30  # pixels per edge
     n = N ** 2
@@ -207,6 +208,8 @@ def run_algorithm():
             plot_std(gamma_prior, N)
         if PLOT_D:
             plot_d(d, k, m)
+        if PLOT_RECONSTRUCTION:
+            plot_reconstruction(x_prior, N)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
 
@@ -233,6 +236,13 @@ def plot_d(d, k, m):
     vertical_line_indicies = np.arange(1, k) * m
     for x_coord in vertical_line_indicies:
         ax.axvline(x=x_coord, color='r', linestyle='--', alpha=0.3)
+
+def plot_reconstruction(x_prior, N):
+    reconstruction = x_prior.reshape(N, N, order='F')
+    fig, ax = plt.subplots()
+    im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    fig.colorbar(im, ax=ax)
+    ax.set_title("ROI reconstruction")
 
 def is_valid(d, D):
     return np.sum(1 / (d ** 2)) <= D

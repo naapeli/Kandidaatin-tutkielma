@@ -50,7 +50,7 @@ visualize_variances = true; % visualize variances after each optimization step?
 draws_from_posterior = false; % visualize random draws from the current posterior?
 D_optimality = false; % compute D-optimal angles and positions?
 A_optimality = true; % compute A-optimal angles and positions?
-pauseko = false; % wheather there is a pause between the optimization rounds 
+pauseko = true; % wheather there is a pause between the optimization rounds 
 
 %% Basic definitions
 
@@ -79,7 +79,6 @@ phi = pi/(2*m):pi/m:pi-pi/(2*m); % the projection angles
 % form the prior covariance
 y = linspace(-0.5,0.5,N); % 
 [Y1,Y2] = meshgrid(y,y); % spatial grid over the unit square
-display(y)
 
 % The last components of the following vectors are ignored "if
 % roi_bg_correl". The values for OBST are a relic from a previous version,
