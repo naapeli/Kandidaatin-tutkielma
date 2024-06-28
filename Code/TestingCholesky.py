@@ -1,18 +1,23 @@
 import numpy as np
+from scipy.linalg import cho_solve, cho_factor
+from time import perf_counter
 
 
 np.random.seed(0)
 
-n = 10
+n = 5000
 gamma_prior = np.random.uniform(size=(n, n))
+other = np.random.uniform(size=(n, n // 100))
 gamma_prior = 0.5 * (gamma_prior + gamma_prior.T)
 gamma_prior = gamma_prior + n * np.eye(n)
+start = perf_counter()
 gamma_prior_inv = np.linalg.inv(gamma_prior)
+gamma_prior_inv = gamma_prior_inv @ other
+print(perf_counter() - start)
 
-L = np.linalg.cholesky(gamma_prior)
-print(np.allclose(gamma_prior, L @ L.T))
-
+start = perf_counter()
+A = cho_factor(gamma_prior)
 # calculate the inverse more efficiently using the Cholesky decomposition
-LT_A_inv = np.linalg.lstsq(L, np.eye(n), rcond=None)[0]
-gamma_prior_inv_chol = np.linalg.lstsq(L.T, LT_A_inv, rcond=None)[0]
+gamma_prior_inv_chol = cho_solve(A, other)
+print(perf_counter() - start)
 print(np.allclose(gamma_prior_inv_chol, gamma_prior_inv))

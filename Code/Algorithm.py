@@ -194,6 +194,9 @@ def run_algorithm():
         # using method = "cholesky" is very important to make this run faster!
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
         sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
+        # sample_x = np.diag(A.toarray())
+        # test = sample_x.reshape(N, N, order="F")
+        # plt.imshow(test)
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
         sample_y = R_k @ sample_x + sample_noise
 
