@@ -12,7 +12,7 @@ def run_algorithm():
     PLOT_ROI = True
     CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
-    PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
+    PLOT_COVARIANCE = True  # Take 4 samples from the posterior covariance matrix
     PLOT_STD = True  # Reconstruct the image based on the standard deviations
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
@@ -35,7 +35,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = 1
+    ROI = 0
     if ROI == 0:
         A = np.ones((N, N))
     elif ROI == 1:
@@ -52,11 +52,15 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
+    TARGET = 1
+    if TARGET == 0:
+        target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
+    elif TARGET == 1:
+        target_data = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
     plt.imshow(target_data)
+    plt.title("Target")
     plt.show()
     target_data = target_data.flatten(order="F")
-
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
