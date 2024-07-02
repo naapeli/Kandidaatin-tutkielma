@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.sparse as sp
 from scipy.sparse import csr_array, load_npz, save_npz
+from scipy.sparse.linalg import spsolve
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
@@ -54,7 +56,12 @@ def run_algorithm():
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
     A = A.flatten(order="F") # this is correct!!!
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
-        
+
+    # define the target
+    target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
+    plt.imshow(target_data)
+    plt.show()
+    target_data = target_data.flatten(order="F")
 
 
     # define projection matricies
@@ -85,6 +92,12 @@ def run_algorithm():
     rng = np.random.default_rng(0)
     number_of_rounds = 20
 
+    # parameters for lagged diffusivity iteration
+    tau = 1e-5
+    T = 1e-5
+    gamma = 1
+    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
+
     for i in range(number_of_rounds):
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
@@ -100,24 +113,6 @@ def run_algorithm():
             Zk_Rk_gamma_prior_A_T = Z_k @ Rk_gamma_prior_A_T
 
             derivative = dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=barrier_const)
-            
-            # # use uniform line search to update d
-            # t_uniform = np.linspace(0, max_length, n_test_points)
-            # min_value = np.inf
-            # optimal_d = d
-            # for t in t_uniform:
-            #     new_d = d - t * learning_rate * derivative
-            #     if not is_valid(new_d, D):
-            #         break
-            #     # calculate the value of the target function and barrier at new_d
-            #     Z_k = get_Z_k(new_d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-            #     gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-            #     value = phi_A(new_d, gamma_posterior, A, D, barrier_const=barrier_const)
-            #     if value < min_value:
-            #         optimal_d = new_d
-            #         min_value = value
-            # # optimal_d is the new chosen point
-            # d = optimal_d
 
             # golden section search
             good_solution_found = False
@@ -186,23 +181,26 @@ def run_algorithm():
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const))
                 print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
 
-        # update gamma_prior after finding optimal d
-        Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-        gamma_prior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-
-        # calculate the measurement
-        # using method = "cholesky" is very important to make this run faster!
+        # do the experiment
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
-        sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
-        # sample_x = np.diag(A.toarray())
-        # test = sample_x.reshape(N, N, order="F")
-        # plt.imshow(test)
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
-        sample_y = R_k @ sample_x + sample_noise
+        sample_y = R_k @ target_data + sample_noise
 
-        # calculate the new x_prior
-        x_posterior = x_prior - gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
-        x_prior = x_posterior
+        # determine the current posterior mean and covariance matrix
+        x_prior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
+        Edges = np.gradient(x_prior)
+
+        # visualise edges
+
+
+
+        # calculate inv_gamma_prior for new optimisation round
+        weight = 1 / np.sqrt(T ** 2 + Edges ** 2)
+        inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
+
+
+
+
 
         # plot the current recreation of the ROI and other debugging features
         if PLOT_COVARIANCE:
@@ -275,6 +273,84 @@ def get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=1e-10):
     gamma_noise = np.diag(d ** 2) + epsilon * np.eye(len(d))
     Z_k = np.linalg.inv(Rk_gamma_prior_Rk_T + gamma_noise)
     return Z_k
+
+def get_H(N, weight):
+    weight = weight.reshape(N, N, order="F")
+    weight1 = (np.vstack([weight, np.zeros((1, N))]) + np.vstack([np.zeros((1, N)), weight])) / 2
+    weight2 = (np.hstack([weight, np.zeros((N, 1))]) + np.hstack([np.zeros((N, 1)), weight])) / 2
+    sqrt_weight1 = np.sqrt(weight1.flatten(order="F"))
+    sqrt_weight2 = np.sqrt(weight2.flatten(order="F"))
+    Weight1 = sp.spdiags(sqrt_weight1, 0, N * (N + 1), N * (N + 1)).tocsr()
+    Weight2 = sp.spdiags(sqrt_weight2, 0, N * (N + 1), N * (N + 1)).tocsr()
+
+    diagonals = np.array([-np.ones(N), np.ones(N)])
+    diag_places = [-1, 0]
+    D = sp.spdiags(diagonals, diag_places, N + 1, N).tocsr()
+    h = 1 / (N + 1)
+    D /= h
+
+    I = sp.eye(N)
+    DD1 = sp.kron(I, D)
+    DD2 = sp.kron(D, I)
+
+    result1 = Weight1 @ DD1
+    result2 = Weight2 @ DD2
+    DD = sp.vstack([result1, result2])
+    L = DD.T @ DD
+    return L
+
+def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
+    rel_diff = tau + 1
+    sum = 0
+    while rel_diff > tau:
+        invH = lambda x: spsolve(inv_gamma_prior, x)
+        B = gamma_noise + R @ invH(R.T)
+        reco = invH(R.T @ spsolve(B, data))
+        Reco = np.reshape(reco, (N, N), order="F")
+        edges, _ = gradient_reco(Reco)
+        sum_old = sum
+        sum = np.sum(np.sum(edges))
+        rel_diff = np.abs(sum - sum_old) / sum
+        weight = 1 / np.sqrt(T ** 2 + edges ** 2)
+        inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
+    return np.reshape(Reco, N ** 2, order="F")
+
+def gradient_reco(reco):
+    N = reco.shape[0]
+    diagonals = 0.5 * np.vstack([-np.ones(N), np.ones(N)])
+    diag_places = [-1, 1]
+    
+    # Create sparse matrix D for central difference approximation
+    D = sp.spdiags(diagonals, diag_places, N, N).tocsr()
+    
+    # Correct first and last rows for forward and backward differences
+    D[0, 0] = -1
+    D[0, 1] = 1
+    D[-1, -2] = -1
+    D[-1, -1] = 1
+    
+    # Proper scaling
+    h = 1 / (N + 1)
+    D = D / h
+
+    # Two dimensional derivatives as Kronecker products
+    I = sp.eye(N)
+    DD1 = sp.kron(I, D)
+    DD2 = sp.kron(D, I)
+    
+    # Stack derivatives vertically
+    DD = sp.vstack([DD1, DD2])
+
+    # Computing the absolute value of the gradient
+    gradientti = DD @ reco.flatten(order="F")  # Derivatives as a single vector
+    reunat2 = gradientti.reshape(N**2, 2, order="F")  # Two columns correspond to two directions
+    
+    # Length of the gradient at each pixel
+    Reunat = np.sqrt(np.sum(reunat2**2, axis=1))
+    
+    # Reshape back to the original size
+    Reunat = Reunat.reshape(N, N, order="F")
+    return Reunat, gradientti
 
 
 run_algorithm()
