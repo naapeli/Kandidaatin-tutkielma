@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.sparse as sp
-from scipy.sparse import csr_array, load_npz, save_npz
+from scipy.sparse import csc_array, load_npz, save_npz
 from scipy.sparse.linalg import spsolve
 
 from ProjectionMatrixCalculation import get_projection_matricies
@@ -26,7 +26,6 @@ def run_algorithm():
     offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
     max_length = 2
-    n_test_points = 10
     barrier_const = 0.00001
 
     # define the grid
@@ -34,11 +33,6 @@ def run_algorithm():
     y = np.linspace(-0.5, 0.5, N)
     X, Y = np.meshgrid(x, y)
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
-
-    # define the priors
-    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.05) + epsilon * np.eye(n)
-    x_prior = np.zeros(n)
-    noise_mean = np.zeros(k * m)
 
     # define ROI
     ROI = 1
@@ -55,7 +49,7 @@ def run_algorithm():
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
     A = A.flatten(order="F") # this is correct!!!
-    A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
+    A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
     target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
@@ -74,7 +68,7 @@ def run_algorithm():
         print("Calculation finished")
     else:
         try:
-            R_k: csr_array = load_npz("Code/Projection_matrix.npz")
+            R_k: csc_array = load_npz("Code/Projection_matrix.npz")
         except:
             print("Loading projection matricies failed! Recalculation started.")
             offsets = np.linspace(-offset_range, offset_range, m)
@@ -83,7 +77,7 @@ def run_algorithm():
     
     # define initial parameters d and the limit D
     d = 0.5 * np.ones(shape=(k * m,))
-    D = 2200000
+    D = 10000
     # make sure d satisfies the boundary condition
 
     # initialise parameters for algorithm
@@ -94,11 +88,19 @@ def run_algorithm():
 
     # parameters for lagged diffusivity iteration
     tau = 1e-5
-    T = 1e-5
-    gamma = 1
+    T = 1e-6
+    gamma = 10
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
 
+    # prior covariance matrix
+    gamma_prior = np.linalg.inv(inv_gamma_prior.todense())
+    noise_mean = np.zeros(k * m)
+
     for i in range(number_of_rounds):
+        # gamma_posterior from the previous iteration
+        gamma_posterior = gamma_prior @ A
+        gamma_prior = gamma_posterior
+
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
         A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
@@ -187,20 +189,21 @@ def run_algorithm():
         sample_y = R_k @ target_data + sample_noise
 
         # determine the current posterior mean and covariance matrix
-        x_prior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
-        Edges = np.gradient(x_prior)
+        x_posterior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
+        x_prior = x_posterior
+        edges, _ = gradient_reco(np.reshape(x_prior, (N, N), order="F"))
 
         # visualise edges
-
+        plt.imshow(edges)
+        plt.show()
 
 
         # calculate inv_gamma_prior for new optimisation round
-        weight = 1 / np.sqrt(T ** 2 + Edges ** 2)
+        weight = 1 / np.sqrt(T ** 2 + edges ** 2)
         inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
 
-
-
-
+        gamma_posterior = np.linalg.inv(inv_gamma_prior + R_k.T @ np.diag(1 / np.diag(gamma_noise)) @ R_k)
+        gamma_prior = gamma_posterior
 
         # plot the current recreation of the ROI and other debugging features
         if PLOT_COVARIANCE:
@@ -211,7 +214,7 @@ def run_algorithm():
             plot_d(d, k, m)
         if PLOT_RECONSTRUCTION:
             plot_reconstruction(x_prior, N)
-        if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
+        if PLOT_COVARIANCE or PLOT_STD or PLOT_D or PLOT_RECONSTRUCTION:
             plt.show()
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
@@ -257,7 +260,7 @@ def dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=0.0
     for j in range(km):
         # dgamma_noise = np.zeros_like(gamma_noise)
         # dgamma_noise[j, j] = 2 * d[j]
-        dgamma_noise = csr_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=(km, km))
+        dgamma_noise = csc_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=(km, km))
         dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
     # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
@@ -280,12 +283,12 @@ def get_H(N, weight):
     weight2 = (np.hstack([weight, np.zeros((N, 1))]) + np.hstack([np.zeros((N, 1)), weight])) / 2
     sqrt_weight1 = np.sqrt(weight1.flatten(order="F"))
     sqrt_weight2 = np.sqrt(weight2.flatten(order="F"))
-    Weight1 = sp.spdiags(sqrt_weight1, 0, N * (N + 1), N * (N + 1)).tocsr()
-    Weight2 = sp.spdiags(sqrt_weight2, 0, N * (N + 1), N * (N + 1)).tocsr()
+    Weight1 = sp.spdiags(sqrt_weight1, 0, N * (N + 1), N * (N + 1), format='csc')
+    Weight2 = sp.spdiags(sqrt_weight2, 0, N * (N + 1), N * (N + 1), format='csc')
 
     diagonals = np.array([-np.ones(N), np.ones(N)])
     diag_places = [-1, 0]
-    D = sp.spdiags(diagonals, diag_places, N + 1, N).tocsr()
+    D = sp.spdiags(diagonals, diag_places, N + 1, N, format='csc')
     h = 1 / (N + 1)
     D /= h
 
@@ -305,7 +308,7 @@ def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
     while rel_diff > tau:
         invH = lambda x: spsolve(inv_gamma_prior, x)
         B = gamma_noise + R @ invH(R.T)
-        reco = invH(R.T @ spsolve(B, data))
+        reco = invH(R.T @ np.linalg.solve(B, data))
         Reco = np.reshape(reco, (N, N), order="F")
         edges, _ = gradient_reco(Reco)
         sum_old = sum
@@ -321,7 +324,7 @@ def gradient_reco(reco):
     diag_places = [-1, 1]
     
     # Create sparse matrix D for central difference approximation
-    D = sp.spdiags(diagonals, diag_places, N, N).tocsr()
+    D = sp.spdiags(diagonals, diag_places, N, N).tolil()
     
     # Correct first and last rows for forward and backward differences
     D[0, 0] = -1
@@ -331,7 +334,7 @@ def gradient_reco(reco):
     
     # Proper scaling
     h = 1 / (N + 1)
-    D = D / h
+    D = D.tocsc() / h
 
     # Two dimensional derivatives as Kronecker products
     I = sp.eye(N)
