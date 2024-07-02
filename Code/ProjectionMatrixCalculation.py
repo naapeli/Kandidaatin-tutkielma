@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.sparse import lil_array, csr_array, save_npz, load_npz
+from scipy.sparse import lil_array, csc_array, save_npz, load_npz
 from time import perf_counter
 
 
@@ -56,11 +56,11 @@ def get_projection_matricies(offsets, angles, N, m):
             kk = (k // m) - 1
             A[kk] = Temp.sum(axis=1) / m
             Temp = lil_array(np.zeros(shape=(N * N, m)))
-            
+
         if k % 5000 == 0:
             print(k, len(offset_angle_pairs))
     # return sparse matrix of the csr format for efficient row operations and saving
-    return csr_array(A)
+    return csc_array(A)
 
 
 # testing
