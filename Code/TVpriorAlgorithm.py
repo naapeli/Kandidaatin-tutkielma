@@ -5,7 +5,6 @@ from scipy.sparse import csc_array, load_npz, save_npz
 from scipy.sparse.linalg import spsolve
 
 from ProjectionMatrixCalculation import get_projection_matricies
-from GaussianDistanceCovariance import gaussian_distance_covariance
 
 
 def run_algorithm():
@@ -26,7 +25,7 @@ def run_algorithm():
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
-    max_length = 5
+    max_length = 10
     barrier_const = 0.00001
 
     # initialise parameters for algorithm
@@ -48,13 +47,15 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = 0
+    ROI = 3
     if ROI == 0:
         A = np.ones((N, N))
     elif ROI == 1:
         A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
     elif ROI == 2:
         A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
+    elif ROI == 3:
+        A = X < 0
     
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
@@ -76,7 +77,7 @@ def run_algorithm():
         for _ in range(amount):
             x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
             a, b = np.random.uniform(0.01, 0.1, size=2)
-            attenuation = np.random.uniform(0.4, 1)
+            attenuation = np.random.uniform(0.5, 5)
             ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
             target_data[ellipse] = attenuation
     
@@ -146,6 +147,11 @@ def run_algorithm():
                 lambda_k = a + (1 - inv_golden_ratio) * (b - a)
                 mu_k = a + inv_golden_ratio * (b - a)
                 reduction *= const
+
+                # make sure the parameters do not go negative
+                if np.any(b < 0):
+                    good_solution_found = False
+                    continue
 
                 # make sure all points are feasible, otherwise move on to a shorter interval
                 if not is_valid(b, D):
