@@ -10,6 +10,7 @@ from GaussianDistanceCovariance import gaussian_distance_covariance
 
 def run_algorithm():
     PLOT_ROI = True
+    PLOT_TARGET = True
     CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
     PLOT_COVARIANCE = True  # Take 4 samples from the posterior covariance matrix
@@ -17,7 +18,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -57,9 +58,11 @@ def run_algorithm():
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == 1:
         target_data = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
-    plt.imshow(target_data)
-    plt.title("Target")
-    plt.show()
+    
+    if PLOT_TARGET:
+        plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.title("Target")
+        plt.show()
     target_data = target_data.flatten(order="F")
 
     # define projection matricies
@@ -198,7 +201,8 @@ def run_algorithm():
         edges, _ = gradient_reco(np.reshape(x_prior, (N, N), order="F"))
 
         # visualise edges
-        plt.imshow(edges)
+        plt.imshow(edges, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.title("Edges")
         plt.show()
 
 
