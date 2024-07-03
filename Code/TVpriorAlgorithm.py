@@ -26,8 +26,20 @@ def run_algorithm():
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
-    max_length = 2
+    max_length = 5
     barrier_const = 0.00001
+
+    # initialise parameters for algorithm
+    learning_rate = 0.01
+    iter_per_round = 20
+    rng = np.random.default_rng(0)
+    number_of_rounds = 20
+
+    # parameters for lagged diffusivity iteration
+    tau = 1e-5
+    T = 1e-6
+    gamma = 10
+    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -53,15 +65,25 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = 1
+    TARGET = 2
     if TARGET == 0:
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == 1:
         target_data = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+    elif TARGET == 2:
+        amount = 3
+        target_data = np.zeros_like(X)
+        for _ in range(amount):
+            x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
+            a, b = np.random.uniform(0.01, 0.1, size=2)
+            attenuation = np.random.uniform(0.4, 1)
+            ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
+            target_data[ellipse] = attenuation
     
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
         plt.title("Target")
+        plt.colorbar()
         plt.show()
     target_data = target_data.flatten(order="F")
 
@@ -85,19 +107,6 @@ def run_algorithm():
     # define initial parameters d and the limit D
     d = 0.5 * np.ones(shape=(k * m,))
     D = 10000
-    # make sure d satisfies the boundary condition
-
-    # initialise parameters for algorithm
-    learning_rate = 0.01
-    iter_per_round = 10
-    rng = np.random.default_rng(0)
-    number_of_rounds = 20
-
-    # parameters for lagged diffusivity iteration
-    tau = 1e-5
-    T = 1e-6
-    gamma = 10
-    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
 
     # prior covariance matrix
     gamma_prior = np.linalg.inv(inv_gamma_prior.todense())
