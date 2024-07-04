@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import scipy.sparse as sp
 from scipy.sparse import csc_array, load_npz, save_npz
 from scipy.sparse.linalg import spsolve
+from skimage.data import shepp_logan_phantom
+from skimage.transform import resize
 
 from ProjectionMatrixCalculation import get_projection_matricies
 
@@ -17,13 +19,13 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
     m = 20  # number of sensors
     epsilon = 1e-10
-    offset_range = 0.8  # the maximum and minimum offset
+    offset_range = 0.80  # the maximum and minimum offset
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
@@ -47,15 +49,17 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = 3
-    if ROI == 0:
+    ROI = "whole"
+    if ROI == "whole":
         A = np.ones((N, N))
-    elif ROI == 1:
+    elif ROI == "offset circle":
         A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
-    elif ROI == 2:
+    elif ROI == "bar":
         A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
-    elif ROI == 3:
+    elif ROI == "left":
         A = X < 0
+    elif ROI == "center circle":
+        A = X ** 2 + Y ** 2 < 0.5 ** 2
     
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
@@ -66,12 +70,12 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = 1
-    if TARGET == 0:
+    TARGET = "ellipses"
+    if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
-    elif TARGET == 1:
+    elif TARGET == "circle":
         target_data = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
-    elif TARGET == 2:
+    elif TARGET == "ellipses":
         amount = 3
         target_data = np.zeros_like(X)
         for _ in range(amount):
@@ -80,6 +84,9 @@ def run_algorithm():
             attenuation = np.random.uniform(0.5, 5)
             ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
             target_data[ellipse] = attenuation
+    elif TARGET == "shepp-logan-phantom":
+        target_data = shepp_logan_phantom()
+        target_data = resize(target_data, (N, N), anti_aliasing=False)
     
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
@@ -281,7 +288,7 @@ def dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=0.0
     dtheta = np.zeros_like(d)
     km = len(d)
     for j in range(km):
-        # dgamma_noise = np.zeros_like(gamma_noise)
+        # dgamma_noise = np.zeros((km, km))
         # dgamma_noise[j, j] = 2 * d[j]
         dgamma_noise = csc_array((np.array([2 * d[j]]), (np.array([j]), np.array([j]))), shape=(km, km))
         dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)

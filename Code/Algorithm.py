@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.sparse import csr_array, load_npz, save_npz
+from skimage.data import shepp_logan_phantom
+from skimage.transform import resize
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
@@ -8,6 +10,7 @@ from GaussianDistanceCovariance import gaussian_distance_covariance
 
 def run_algorithm():
     PLOT_ROI = True
+    PLOT_TARGET = True
     CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
     PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
@@ -35,17 +38,20 @@ def run_algorithm():
 
     # define the priors
     gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.05) + epsilon * np.eye(n)
-    x_prior = np.zeros(n)
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = 1
-    if ROI == 0:
+    ROI = "whole"
+    if ROI == "whole":
         A = np.ones((N, N))
-    elif ROI == 1:
+    elif ROI == "offset circle":
         A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
-    elif ROI == 2:
+    elif ROI == "bar":
         A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
+    elif ROI == "left":
+        A = X < 0
+    elif ROI == "center circle":
+        A = X ** 2 + Y ** 2 < 0.5 ** 2
     
     if PLOT_ROI:
         plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
@@ -55,7 +61,32 @@ def run_algorithm():
     A = A.flatten(order="F") # this is correct!!!
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
         
-
+    # define the target
+    TARGET = "ellipses"
+    if TARGET == "bar":
+        target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
+    elif TARGET == "circle":
+        target_data = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+    elif TARGET == "ellipses":
+        amount = 3
+        target_data = np.zeros_like(X)
+        for _ in range(amount):
+            x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
+            a, b = np.random.uniform(0.01, 0.1, size=2)
+            attenuation = np.random.uniform(0.5, 5)
+            ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
+            target_data[ellipse] = attenuation
+    elif TARGET == "shepp-logan-phantom":
+        target_data = shepp_logan_phantom()
+        target_data = resize(target_data, (N, N), anti_aliasing=False)
+    
+    if PLOT_TARGET:
+        plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.title("Target")
+        plt.colorbar()
+        plt.show()
+    target_data = target_data.flatten(order="F")
+    x_prior = target_data
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
@@ -100,24 +131,6 @@ def run_algorithm():
             Zk_Rk_gamma_prior_A_T = Z_k @ Rk_gamma_prior_A_T
 
             derivative = dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=barrier_const)
-            
-            # # use uniform line search to update d
-            # t_uniform = np.linspace(0, max_length, n_test_points)
-            # min_value = np.inf
-            # optimal_d = d
-            # for t in t_uniform:
-            #     new_d = d - t * learning_rate * derivative
-            #     if not is_valid(new_d, D):
-            #         break
-            #     # calculate the value of the target function and barrier at new_d
-            #     Z_k = get_Z_k(new_d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-            #     gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-            #     value = phi_A(new_d, gamma_posterior, A, D, barrier_const=barrier_const)
-            #     if value < min_value:
-            #         optimal_d = new_d
-            #         min_value = value
-            # # optimal_d is the new chosen point
-            # d = optimal_d
 
             # golden section search
             good_solution_found = False
