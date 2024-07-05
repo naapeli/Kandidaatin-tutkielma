@@ -19,7 +19,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -32,12 +32,12 @@ def run_algorithm():
 
     # initialise parameters for algorithm
     learning_rate = 0.01
-    iter_per_round = 20
+    relative_tolerance = 0.0001
     rng = np.random.default_rng(0)
     number_of_rounds = 20
 
     # parameters for lagged diffusivity iteration
-    tau = 1e-5
+    tau = 1e-7
     T = 1e-6
     gamma = 10
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
@@ -49,7 +49,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = "whole"
+    ROI = "center circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -70,7 +70,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "ellipses"
+    TARGET = "shepp-logan-phantom"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -78,10 +78,20 @@ def run_algorithm():
     elif TARGET == "ellipses":
         amount = 3
         target_data = np.zeros_like(X)
-        for _ in range(amount):
+        count = 0
+        memory = []
+        while count < amount:
             x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
             a, b = np.random.uniform(0.01, 0.1, size=2)
             attenuation = np.random.uniform(0.5, 5)
+            retry = False
+            for x, y, att in memory:
+                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 1:
+                    retry = True
+                    break
+            if retry: continue
+            memory.append((x_loc, y_loc, attenuation))
+            count += 1
             ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
             target_data[ellipse] = attenuation
     elif TARGET == "shepp-logan-phantom":
@@ -131,7 +141,8 @@ def run_algorithm():
         Rk_gamma_prior_A_T = R_k @ gamma_prior @ A.T
 
         # find optimal d on this picture with gradient descent
-        for l in range(iter_per_round):
+        l = 1
+        while np.abs(np.sum(1 / (d ** 2)) - D) / D > relative_tolerance:
             Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
 
             # Calculate the gradient wrt d
@@ -210,7 +221,8 @@ def run_algorithm():
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const))
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
+                l += 1
 
         # do the experiment
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
@@ -254,7 +266,7 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
     for i, ax in enumerate(axs.flat):
         im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
         fig.colorbar(im, ax=ax)
-    fig.suptitle("Samples from covariance matrix")
+    fig.suptitle("Samples from posterior distribution")
 
 def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
