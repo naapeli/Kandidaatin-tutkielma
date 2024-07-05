@@ -27,7 +27,6 @@ def run_algorithm():
     offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
     max_length = 2
-    n_test_points = 10
     barrier_const = 0.00001
 
     # define the grid
@@ -41,11 +40,11 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "whole"
+    ROI = "offset circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
-        A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+        A = (X - 0.2) ** 2 + (Y - 0.2) ** 2 < 0.25 ** 2
     elif ROI == "bar":
         A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
     elif ROI == "left":
@@ -70,10 +69,20 @@ def run_algorithm():
     elif TARGET == "ellipses":
         amount = 3
         target_data = np.zeros_like(X)
-        for _ in range(amount):
+        count = 0
+        memory = []
+        while count < amount:
             x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
             a, b = np.random.uniform(0.01, 0.1, size=2)
             attenuation = np.random.uniform(0.5, 5)
+            retry = False
+            for x, y, att in memory:
+                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 1:
+                    retry = True
+                    break
+            if retry: continue
+            memory.append((x_loc, y_loc, attenuation))
+            count += 1
             ellipse = ((X - x_loc) ** 2) / a + ((Y - y_loc) ** 2) / b < 1
             target_data[ellipse] = attenuation
     elif TARGET == "shepp-logan-phantom":

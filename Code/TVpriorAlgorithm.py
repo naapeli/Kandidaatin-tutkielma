@@ -19,7 +19,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -32,15 +32,14 @@ def run_algorithm():
 
     # initialise parameters for algorithm
     learning_rate = 0.01
-    relative_tolerance = 0.0001
+    relative_tolerance = 0.001
     rng = np.random.default_rng(0)
     number_of_rounds = 20
 
     # parameters for lagged diffusivity iteration
-    tau = 1e-7
+    tau = 1e-5
     T = 1e-6
     gamma = 10
-    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -53,7 +52,7 @@ def run_algorithm():
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
-        A = (X - 0.1) ** 2 + (Y - 0.1) ** 2 < 0.25 ** 2
+        A = (X - 0.2) ** 2 + (Y - 0.2) ** 2 < 0.25 ** 2
     elif ROI == "bar":
         A = np.logical_and((np.abs(Y) < 0.5), X < -0.45)
     elif ROI == "left":
@@ -70,7 +69,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "shepp-logan-phantom"
+    TARGET = "ellipses"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -83,10 +82,10 @@ def run_algorithm():
         while count < amount:
             x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
             a, b = np.random.uniform(0.01, 0.1, size=2)
-            attenuation = np.random.uniform(0.5, 5)
+            attenuation = np.random.uniform(0.2, 1)
             retry = False
             for x, y, att in memory:
-                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 1:
+                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 0.2:
                     retry = True
                     break
             if retry: continue
@@ -127,14 +126,11 @@ def run_algorithm():
     D = 10000
 
     # prior covariance matrix
+    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
     gamma_prior = np.linalg.inv(inv_gamma_prior.todense())
     noise_mean = np.zeros(k * m)
 
     for i in range(number_of_rounds):
-        # gamma_posterior from the previous iteration
-        gamma_posterior = gamma_prior @ A
-        gamma_prior = gamma_posterior
-
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
         A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
@@ -234,12 +230,6 @@ def run_algorithm():
         x_prior = x_posterior
         edges, _ = gradient_reco(np.reshape(x_prior, (N, N), order="F"))
 
-        # visualise edges
-        plt.imshow(edges, cmap='viridis', interpolation='nearest', origin='lower')
-        plt.title("Edges")
-        plt.show()
-
-
         # calculate inv_gamma_prior for new optimisation round
         weight = 1 / np.sqrt(T ** 2 + edges ** 2)
         inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
@@ -258,6 +248,7 @@ def run_algorithm():
             plot_reconstruction(x_prior, N)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D or PLOT_RECONSTRUCTION:
             plt.show()
+        d = 0.5 * np.ones(shape=(k * m,))
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
@@ -347,7 +338,8 @@ def get_H(N, weight):
 def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
     rel_diff = tau + 1
     sum = 0
-    while rel_diff > tau:
+    i = 0
+    while rel_diff > tau and i < 30:
         invH = lambda x: spsolve(inv_gamma_prior, x)
         B = gamma_noise + R @ invH(R.T)
         reco = invH(R.T @ np.linalg.solve(B, data))
@@ -358,6 +350,7 @@ def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
         rel_diff = np.abs(sum - sum_old) / sum
         weight = 1 / np.sqrt(T ** 2 + edges ** 2)
         inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
+        i += 1
     return np.reshape(Reco, N ** 2, order="F")
 
 def gradient_reco(reco):
