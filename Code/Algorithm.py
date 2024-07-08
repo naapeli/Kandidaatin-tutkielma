@@ -47,7 +47,7 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "offset circle"
+    ROI = "whole"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -68,7 +68,7 @@ def run_algorithm():
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "center circle"
+    TARGET = "horseshoe"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -98,6 +98,21 @@ def run_algorithm():
     elif TARGET == "center circle":
         target_data = np.zeros((N, N))
         target_data[X ** 2 + Y ** 2 < 0.25 ** 2] = 1
+    elif TARGET == "tumor with vein":
+        target_data = np.zeros((N, N))
+        circle_mask = X ** 2 + Y ** 2 < 0.45 ** 2
+        diagonal_mask = np.abs(X - Y) < (1 / 20)
+        target_data[circle_mask] = 1
+        target_data[circle_mask & diagonal_mask] = 0
+    elif TARGET == "horseshoe":
+        target_data = np.zeros((N, N))
+        circle1_mask = X ** 2 + Y ** 2 < 0.45 ** 2
+        circle2_mask = X ** 2 + Y ** 2 < 0.35 ** 2
+        diagonal_mask = np.abs(X - Y) < (1 / 5)
+        left_mask = X < 0
+        target_data[circle1_mask] = 1
+        target_data[circle2_mask] = 0
+        target_data[left_mask & diagonal_mask] = 0
     
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
