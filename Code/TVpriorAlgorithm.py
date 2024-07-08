@@ -19,7 +19,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
@@ -29,12 +29,13 @@ def run_algorithm():
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
+    dose_limit = 1000000
 
     # initialise parameters for algorithm
     learning_rate = 0.01
     relative_tolerance = 0.001
     rng = np.random.default_rng(1)
-    number_of_rounds = 20
+    number_of_rounds = 5
     iter_per_round = 20
 
     # parameters for lagged diffusivity iteration
@@ -49,7 +50,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = "center circle"
+    ROI = "left"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -70,7 +71,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "ellipses"
+    TARGET = "3 circles"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -105,7 +106,22 @@ def run_algorithm():
     elif TARGET == "center circle":
         target_data = np.zeros((N, N))
         target_data[X ** 2 + Y ** 2 < 0.25 ** 2] = 1
-    
+    elif TARGET == "tumor with vein":
+        target_data = np.zeros((N, N))
+        circle_mask = X ** 2 + Y ** 2 < 0.45 ** 2
+        diagonal_mask = np.abs(X - Y) < (1 / 20)
+        target_data[circle_mask] = 1
+        target_data[circle_mask & diagonal_mask] = 0
+    elif TARGET == "horseshoe":
+        target_data = np.zeros((N, N))
+        circle1_mask = X ** 2 + Y ** 2 < 0.45 ** 2
+        circle2_mask = X ** 2 + Y ** 2 < 0.35 ** 2
+        diagonal_mask = np.abs(X - Y) < (1 / 5)
+        left_mask = X < 0
+        target_data[circle1_mask] = 1
+        target_data[circle2_mask] = 0
+        target_data[left_mask & diagonal_mask] = 0
+
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
         plt.title("Target")
@@ -131,8 +147,8 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = 0.05 * np.ones(shape=(k * m,))
-    D = 100000
+    d = 0.1 * np.ones(shape=(k * m,))
+    limits = np.linspace(0, dose_limit, number_of_rounds + 1)[1:]
 
     # prior covariance matrix
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
@@ -140,6 +156,10 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     for i in range(number_of_rounds):
+        # A-weighted prior
+        gamma_prior = gamma_prior @ A
+
+        D = limits[i]
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
         A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
@@ -232,9 +252,7 @@ def run_algorithm():
         # do the experiment
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
-        sample_y = (R_k @ target_data) + sample_noise
-        plt.plot(sample_y)
-        plt.show()
+        sample_y = R_k @ target_data + sample_noise
 
         # determine the current posterior mean and covariance matrix
         x_posterior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)

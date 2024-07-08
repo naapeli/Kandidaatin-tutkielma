@@ -28,6 +28,13 @@ def run_algorithm():
     # line search parameters
     max_length = 2
     barrier_const = 0.00001
+    dose_limit = 500000
+
+    # initialise parameters for algorithm
+    learning_rate = 0.01
+    iter_per_round = 10
+    rng = np.random.default_rng(1)
+    number_of_rounds = 5
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -40,7 +47,7 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "whole"
+    ROI = "offset circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -118,21 +125,19 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = 0.5 * np.ones(shape=(k * m,))
-    D = 100000
-    # make sure d satisfies the boundary condition
-
-    # initialise parameters for algorithm
-    learning_rate = 0.01
-    iter_per_round = 10
-    rng = np.random.default_rng(0)
-    number_of_rounds = 20
+    d = 0.1 * np.ones(shape=(k * m,))
+    limits = np.linspace(0, dose_limit, number_of_rounds + 1)[1:]
 
     for i in range(number_of_rounds):
+        D = limits[i]
+
+        # A-weighted prior
+        weighted_gamma_prior = gamma_prior @ A
+
         # calculate helper matricies that remain the same during the gradient descent
-        Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
-        A_gamma_prior_Rk_T = A @ gamma_prior @ R_k.T
-        Rk_gamma_prior_A_T = R_k @ gamma_prior @ A.T
+        Rk_gamma_prior_Rk_T = R_k @ weighted_gamma_prior @ R_k.T
+        A_gamma_prior_Rk_T = A @ weighted_gamma_prior @ R_k.T
+        Rk_gamma_prior_A_T = R_k @ weighted_gamma_prior @ A.T
 
         # find optimal d on this picture with gradient descent
         for l in range(iter_per_round):
@@ -172,10 +177,10 @@ def run_algorithm():
 
                 # values at the start and end points
                 Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                 lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
                 Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                 mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
 
                 while np.any(np.abs(b - a) > tolerance):
@@ -188,7 +193,7 @@ def run_algorithm():
                             break
                         # calculate value at mu_k
                         Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                        gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                        gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                         mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
                     else:
                         b = mu_k
@@ -199,7 +204,7 @@ def run_algorithm():
                             break
                         # calculate value at lambda_k
                         Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                        gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                        gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                         lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
             d = a if lambda_k_value < mu_k_value else b
             if not is_valid(d, D):  # should never enter here
@@ -207,12 +212,12 @@ def run_algorithm():
 
             if TRACK_PHI_A:
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
-                gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+                gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const))
                 print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
 
         # update gamma_prior after finding optimal d
-        Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
+        Z_k = get_Z_k(d, R_k @ gamma_prior @ R_k.T, epsilon=epsilon)
         gamma_prior = get_gamma_posterior(gamma_prior, R_k, Z_k)
 
         # calculate the measurement
@@ -224,7 +229,7 @@ def run_algorithm():
 
         # calculate the new x_prior
         Z_k = get_Z_k(d, R_k @ gamma_prior @ R_k.T, epsilon=epsilon)
-        x_posterior = x_prior - gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
+        x_posterior = x_prior + gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
         x_prior = x_posterior
 
         # plot the current recreation of the ROI and other debugging features
