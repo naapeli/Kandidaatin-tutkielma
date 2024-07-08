@@ -18,7 +18,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -40,7 +40,7 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "offset circle"
+    ROI = "center circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -74,7 +74,7 @@ def run_algorithm():
         while count < amount:
             x_loc, y_loc = np.random.uniform(-0.3, 0.3, size=2)
             a, b = np.random.uniform(0.01, 0.1, size=2)
-            attenuation = np.random.uniform(0.5, 5)
+            attenuation = np.random.uniform(0.2, 1)
             retry = False
             for x, y, att in memory:
                 if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 1:
@@ -95,7 +95,7 @@ def run_algorithm():
         plt.colorbar()
         plt.show()
     target_data = target_data.flatten(order="F")
-    x_prior = target_data
+    x_prior = np.zeros_like(target_data)
 
     # define projection matricies
     if CALCULATE_PROJECTION_MATRICIES:
@@ -215,14 +215,12 @@ def run_algorithm():
         # calculate the measurement
         # using method = "cholesky" is very important to make this run faster!
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
-        sample_x = rng.multivariate_normal(x_prior, gamma_prior, method='cholesky')
-        # sample_x = np.diag(A.toarray())
-        # test = sample_x.reshape(N, N, order="F")
-        # plt.imshow(test)
+        # sample_x = rng.multivariate_normal(target_data, gamma_prior, method='cholesky')
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
-        sample_y = R_k @ sample_x + sample_noise
+        sample_y = R_k @ target_data + sample_noise
 
         # calculate the new x_prior
+        Z_k = get_Z_k(d, R_k @ gamma_prior @ R_k.T, epsilon=epsilon)
         x_posterior = x_prior - gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
         x_prior = x_posterior
 
@@ -267,7 +265,7 @@ def plot_reconstruction(x_prior, N):
     fig, ax = plt.subplots()
     im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
-    ax.set_title("ROI reconstruction")
+    ax.set_title("Target reconstruction")
 
 def is_valid(d, D):
     return np.sum(1 / (d ** 2)) <= D
