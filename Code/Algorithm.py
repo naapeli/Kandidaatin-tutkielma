@@ -18,7 +18,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -40,7 +40,7 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "center circle"
+    ROI = "whole"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -59,9 +59,9 @@ def run_algorithm():
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
     A = A.flatten(order="F") # this is correct!!!
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
-        
+
     # define the target
-    TARGET = "ellipses"
+    TARGET = "center circle"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -77,7 +77,7 @@ def run_algorithm():
             attenuation = np.random.uniform(0.2, 1)
             retry = False
             for x, y, att in memory:
-                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 1:
+                if np.sqrt((x - x_loc) ** 2 + (y - y_loc) ** 2) < 0.4 or np.abs(att - attenuation) < 0.2:
                     retry = True
                     break
             if retry: continue
@@ -88,6 +88,9 @@ def run_algorithm():
     elif TARGET == "shepp-logan-phantom":
         target_data = shepp_logan_phantom()
         target_data = resize(target_data, (N, N), anti_aliasing=False)
+    elif TARGET == "center circle":
+        target_data = np.zeros((N, N))
+        target_data[X ** 2 + Y ** 2 < 0.25 ** 2] = 1
     
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
@@ -116,7 +119,7 @@ def run_algorithm():
     
     # define initial parameters d and the limit D
     d = 0.5 * np.ones(shape=(k * m,))
-    D = 2200000
+    D = 100000
     # make sure d satisfies the boundary condition
 
     # initialise parameters for algorithm

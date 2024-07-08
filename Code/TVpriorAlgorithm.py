@@ -22,10 +22,10 @@ def run_algorithm():
     N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
-    mm = 2  # number of rays per sensor
+    mm = 10  # number of rays per sensor
     m = 20  # number of sensors
     epsilon = 1e-10
-    offset_range = 0.80  # the maximum and minimum offset
+    offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
@@ -33,8 +33,9 @@ def run_algorithm():
     # initialise parameters for algorithm
     learning_rate = 0.01
     relative_tolerance = 0.001
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(1)
     number_of_rounds = 20
+    iter_per_round = 20
 
     # parameters for lagged diffusivity iteration
     tau = 1e-5
@@ -96,6 +97,14 @@ def run_algorithm():
     elif TARGET == "shepp-logan-phantom":
         target_data = shepp_logan_phantom()
         target_data = resize(target_data, (N, N), anti_aliasing=False)
+    elif TARGET == "3 circles":
+        target_data = np.zeros((N, N))
+        target_data[X ** 2 + Y ** 2 < 0.15 ** 2] = 0.5
+        target_data[(X - 0.25) ** 2 + (Y - 0.25) ** 2 < 0.15 ** 2] = 1
+        target_data[(X + 0.25) ** 2 + (Y + 0.25) ** 2 < 0.15 ** 2] = 1
+    elif TARGET == "center circle":
+        target_data = np.zeros((N, N))
+        target_data[X ** 2 + Y ** 2 < 0.25 ** 2] = 1
     
     if PLOT_TARGET:
         plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
@@ -122,8 +131,8 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = 0.5 * np.ones(shape=(k * m,))
-    D = 10000
+    d = 0.05 * np.ones(shape=(k * m,))
+    D = 100000
 
     # prior covariance matrix
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
@@ -138,7 +147,7 @@ def run_algorithm():
 
         # find optimal d on this picture with gradient descent
         l = 1
-        while np.abs(np.sum(1 / (d ** 2)) - D) / D > relative_tolerance:
+        while np.abs(np.sum(1 / (d ** 2)) - D) / D > relative_tolerance and l < iter_per_round:
             Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
 
             # Calculate the gradient wrt d
@@ -217,13 +226,15 @@ def run_algorithm():
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const))
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
                 l += 1
 
         # do the experiment
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
-        sample_y = R_k @ target_data + sample_noise
+        sample_y = (R_k @ target_data) + sample_noise
+        plt.plot(sample_y)
+        plt.show()
 
         # determine the current posterior mean and covariance matrix
         x_posterior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
@@ -248,7 +259,6 @@ def run_algorithm():
             plot_reconstruction(x_prior, N)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D or PLOT_RECONSTRUCTION:
             plt.show()
-        d = 0.5 * np.ones(shape=(k * m,))
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
@@ -268,7 +278,7 @@ def plot_std(gamma_posterior, N):
     ax.set_title("ROI reconstruction with variance")
 
 def plot_d(d, k, m):
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
     ax.plot(d)
     vertical_line_indicies = np.arange(1, k) * m
     for x_coord in vertical_line_indicies:
