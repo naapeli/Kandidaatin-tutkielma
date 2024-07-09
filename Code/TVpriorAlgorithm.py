@@ -19,7 +19,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
@@ -29,7 +29,9 @@ def run_algorithm():
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 1000000
+    dose_limit = 100_000 # 1_000_000
+    initial_d = 0.1
+    epsilon_d = 1e-6
 
     # initialise parameters for algorithm
     learning_rate = 0.01
@@ -50,7 +52,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = "left"
+    ROI = "whole"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -71,7 +73,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "3 circles"
+    TARGET = "ellipses"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -147,8 +149,8 @@ def run_algorithm():
             R_k = get_projection_matricies(offsets, angles, N, 1)
     
     # define initial parameters d and the limit D
-    d = 0.1 * np.ones(shape=(k * m,))
-    limits = np.linspace(0, dose_limit, number_of_rounds + 1)[1:]
+    d = initial_d * np.ones(shape=(k * m,))
+    limits = np.linspace(1.1 * k * m / initial_d ** 2, dose_limit, number_of_rounds)
 
     # prior covariance matrix
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
@@ -167,14 +169,14 @@ def run_algorithm():
 
         # find optimal d on this picture with gradient descent
         l = 1
-        while np.abs(np.sum(1 / (d ** 2)) - D) / D > relative_tolerance and l < iter_per_round:
+        while np.abs(np.sum(1 / (d + epsilon_d) ** 2) - D) / D > relative_tolerance and l < iter_per_round:
             Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
 
             # Calculate the gradient wrt d
             A_gamma_prior_Rk_T_Zk = A_gamma_prior_Rk_T @ Z_k
             Zk_Rk_gamma_prior_A_T = Z_k @ Rk_gamma_prior_A_T
 
-            derivative = dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=barrier_const)
+            derivative = dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=barrier_const, epsilon_d=epsilon_d)
 
             # golden section search
             good_solution_found = False
@@ -197,56 +199,56 @@ def run_algorithm():
                     continue
 
                 # make sure all points are feasible, otherwise move on to a shorter interval
-                if not is_valid(b, D):
+                if not is_valid(b, D, epsilon_d=epsilon_d):
                     good_solution_found = False
                     continue
-                if not is_valid(lambda_k, D):
+                if not is_valid(lambda_k, D, epsilon_d=epsilon_d):
                     good_solution_found = False
                     continue
-                if not is_valid(mu_k, D):
+                if not is_valid(mu_k, D, epsilon_d=epsilon_d):
                     good_solution_found = False
                     continue
 
                 # values at the start and end points
                 Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d)
                 Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d)
 
                 while np.any(np.abs(b - a) > tolerance):
                     if lambda_k_value > mu_k_value:
                         a = lambda_k
                         lambda_k = mu_k
                         mu_k = a + inv_golden_ratio * (b - a)
-                        if not is_valid(mu_k, D):
+                        if not is_valid(mu_k, D, epsilon_d=epsilon_d):
                             good_solution_found = False
                             break
                         # calculate value at mu_k
                         Z_k = get_Z_k(mu_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                         gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                        mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                        mu_k_value = phi_A(mu_k, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d)
                     else:
                         b = mu_k
                         mu_k = lambda_k
                         lambda_k = a + (1 - inv_golden_ratio) * (b - a)
-                        if not is_valid(lambda_k, D):
+                        if not is_valid(lambda_k, D, epsilon_d=epsilon_d):
                             good_solution_found = False
                             break
                         # calculate value at lambda_k
                         Z_k = get_Z_k(lambda_k, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                         gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                        lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const)
+                        lambda_k_value = phi_A(lambda_k, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d)
             d = a if lambda_k_value < mu_k_value else b
-            if not is_valid(d, D):  # should never enter here
+            if not is_valid(d, D, epsilon_d=epsilon_d):  # should never enter here
                 print("result outside of wanted region")
 
             if TRACK_PHI_A:
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
-                phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const))
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d ** 2)))}")
+                phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d))
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d + epsilon_d) ** 2))}")
                 l += 1
 
         # do the experiment
@@ -283,7 +285,7 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = sample_x.reshape(4, N, N, order='F')
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
     for i, ax in enumerate(axs.flat):
-        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
+        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
         fig.colorbar(im, ax=ax)
     fig.suptitle("Samples from posterior distribution")
 
@@ -291,7 +293,7 @@ def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
@@ -305,17 +307,17 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction")
 
-def is_valid(d, D):
-    return np.sum(1 / (d ** 2)) <= D
+def is_valid(d, D, epsilon_d=1e-6):
+    return np.sum(1 / (d + epsilon_d) ** 2) <= D
 
-def phi_A(d, gamma_posterior, A, D, barrier_const=0.00001):
-    return np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / d ** 2))
+def phi_A(d, gamma_posterior, A, D, barrier_const=0.00001, epsilon_d=1e-6):
+    return np.trace(A @ gamma_posterior @ A.T) - barrier_const * np.log(D - np.sum(1 / (d + epsilon_d) ** 2))
 
-def dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=0.00001):
+def dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=0.00001, epsilon_d=1e-6):
     dtheta = np.zeros_like(d)
     km = len(d)
     for j in range(km):
@@ -325,7 +327,7 @@ def dphi_A(d, A_gamma_prior_Rk_T_Zk, Zk_Rk_gamma_prior_A_T, D, barrier_const=0.0
         dtheta[j] = np.trace(A_gamma_prior_Rk_T_Zk @ dgamma_noise @ Zk_Rk_gamma_prior_A_T)
 
     # Add barrier function to the target function to discourage d to go past the dose of radiation limit (barrier function is -const * ln(D - np.sum(1 / d ** 2)))
-    dbarrier = barrier_const * 2 * (d ** -3) / (D - np.sum(1 / d ** 2))
+    dbarrier = barrier_const * 2 * ((d + epsilon_d) ** -3) / (D - np.sum(1 / (d + epsilon_d) ** 2))
     derivative = dtheta - dbarrier
     return derivative
 
