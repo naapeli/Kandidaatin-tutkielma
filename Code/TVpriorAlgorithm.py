@@ -5,8 +5,20 @@ from scipy.sparse import csc_array, load_npz, save_npz
 from scipy.sparse.linalg import spsolve
 from skimage.data import shepp_logan_phantom
 from skimage.transform import resize
+import scienceplots
 
 from ProjectionMatrixCalculation import get_projection_matricies
+
+
+plt.style.use(["science"])
+plt.rcParams['text.usetex'] = True
+plt.rcParams['figure.figsize'] = [6, 6]
+plt.rcParams['font.size'] = 16
+plt.rcParams['figure.autolayout'] = True
+plt.rcParams['xtick.bottom'] = False
+plt.rcParams['xtick.labelbottom'] = False
+plt.rcParams['ytick.left'] = False
+plt.rcParams['ytick.labelleft'] = False
 
 
 def run_algorithm():
@@ -19,25 +31,25 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
-    m = 20  # number of sensors
+    m = 40  # number of sensors
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 100_000 # 1_000_000
-    initial_d = 0.1
+    dose_limit = 500_000
+    initial_d = 0.05
     epsilon_d = 1e-6
 
     # initialise parameters for algorithm
     learning_rate = 0.01
     relative_tolerance = 0.001
     rng = np.random.default_rng(1)
-    number_of_rounds = 5
+    number_of_rounds = 10
     iter_per_round = 20
 
     # parameters for lagged diffusivity iteration
@@ -73,7 +85,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "ellipses"
+    TARGET = "shepp-logan-phantom"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -156,6 +168,8 @@ def run_algorithm():
     inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
     gamma_prior = np.linalg.inv(inv_gamma_prior.todense())
     noise_mean = np.zeros(k * m)
+
+    errors = []
 
     for i in range(number_of_rounds):
         # A-weighted prior
@@ -269,6 +283,8 @@ def run_algorithm():
         gamma_prior = gamma_posterior
 
         # plot the current recreation of the ROI and other debugging features
+        L2error = np.sqrt(np.sum((target_data - x_prior) ** 2) / np.sum(target_data ** 2))
+        errors.append(L2error)
         if PLOT_COVARIANCE:
             plot_covariance(x_prior, gamma_prior, rng, N)
         if PLOT_STD:
@@ -279,6 +295,18 @@ def run_algorithm():
             plot_reconstruction(x_prior, N)
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D or PLOT_RECONSTRUCTION:
             plt.show()
+    # style the plot for the reconstruction errors
+    plt.style.use(["science", "grid"])
+    plt.rcParams['figure.figsize'] = [6, 6]
+    plt.rcParams['xtick.bottom'] = True
+    plt.rcParams['xtick.labelbottom'] = True
+    plt.rcParams['ytick.left'] = True
+    plt.rcParams['ytick.labelleft'] = True
+    
+    plt.plot(np.arange(number_of_rounds), np.array(errors), ".")
+    plt.xlabel("Iteration")
+    plt.ylabel("Relative $L^2$-reconstruction error")
+    plt.show()
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')

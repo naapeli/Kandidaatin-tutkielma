@@ -3,9 +3,17 @@ import matplotlib.pyplot as plt
 from scipy.sparse import csr_array, load_npz, save_npz
 from skimage.data import shepp_logan_phantom
 from skimage.transform import resize
+import scienceplots
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
+
+
+plt.style.use(["science"])
+plt.rcParams['text.usetex'] = True
+plt.rcParams['figure.figsize'] = [6, 6]
+plt.rcParams['font.size'] = 16
+plt.rcParams['figure.autolayout'] = True
 
 
 def run_algorithm():
@@ -18,7 +26,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 2  # number of rays per sensor
@@ -30,7 +38,7 @@ def run_algorithm():
     # line search parameters
     max_length = 2
     barrier_const = 0.00001
-    dose_limit = 500000
+    dose_limit = 100_000
 
     # initialise parameters for algorithm
     learning_rate = 0.01
