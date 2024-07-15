@@ -7,6 +7,7 @@ import scienceplots
 
 from ProjectionMatrixCalculation import get_projection_matricies
 from GaussianDistanceCovariance import gaussian_distance_covariance
+from colormap import parula_map
 
 
 plt.style.use(["science"])
@@ -14,6 +15,14 @@ plt.rcParams['text.usetex'] = True
 plt.rcParams['figure.figsize'] = [6, 6]
 plt.rcParams['font.size'] = 16
 plt.rcParams['figure.autolayout'] = True
+plt.rcParams['xtick.bottom'] = False
+plt.rcParams['xtick.labelbottom'] = False
+plt.rcParams['ytick.left'] = False
+plt.rcParams['ytick.labelleft'] = False
+plt.rcParams['xtick.top'] = False
+plt.rcParams['xtick.labeltop'] = False
+plt.rcParams['ytick.right'] = False
+plt.rcParams['ytick.labelright'] = False
 
 
 def run_algorithm():
@@ -26,25 +35,26 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
-    mm = 2  # number of rays per sensor
-    m = 20  # number of sensors
+    mm = 10  # number of rays per sensor
+    m = 40  # number of sensors
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
     initial_d = 0.1
     epsilon_d = 1e-6
     # line search parameters
-    max_length = 2
+    max_length = 10
     barrier_const = 0.00001
-    dose_limit = 100_000
+    dose_limit = 5_000_000
 
     # initialise parameters for algorithm
     learning_rate = 0.01
+    relative_tolerance = 0.00001
     iter_per_round = 10
     rng = np.random.default_rng(1)
-    number_of_rounds = 5
+    number_of_rounds = 10
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -70,7 +80,7 @@ def run_algorithm():
         A = X ** 2 + Y ** 2 < 0.5 ** 2
     
     if PLOT_ROI:
-        plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.imshow(A, cmap=parula_map, interpolation='nearest', origin='lower')
         plt.colorbar()
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
@@ -78,7 +88,7 @@ def run_algorithm():
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "horseshoe"
+    TARGET = "tumor with vein"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -125,7 +135,7 @@ def run_algorithm():
         target_data[left_mask & diagonal_mask] = 0
     
     if PLOT_TARGET:
-        plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.imshow(target_data, cmap=parula_map, interpolation='nearest', origin='lower')
         plt.title("Target")
         plt.colorbar()
         plt.show()
@@ -153,6 +163,10 @@ def run_algorithm():
     d = initial_d * np.ones(shape=(k * m,))
     limits = np.linspace(1.1 * k * m / initial_d ** 2, dose_limit, number_of_rounds)
 
+    errors = []
+    targets = []
+    doses = []
+
     for i in range(number_of_rounds):
         D = limits[i]
 
@@ -165,7 +179,8 @@ def run_algorithm():
         Rk_gamma_prior_A_T = R_k @ weighted_gamma_prior @ A.T
 
         # find optimal d on this picture with gradient descent
-        for l in range(iter_per_round):
+        l = 1
+        while np.abs(np.sum(1 / (d + epsilon_d) ** 2) - D) / D > relative_tolerance and l < iter_per_round:
             Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
 
             # Calculate the gradient wrt d
@@ -188,6 +203,11 @@ def run_algorithm():
                 lambda_k = a + (1 - inv_golden_ratio) * (b - a)
                 mu_k = a + inv_golden_ratio * (b - a)
                 reduction *= const
+
+                # make sure the parameters do not go negative
+                if np.any(b < 0):
+                    good_solution_found = False
+                    continue
 
                 # make sure all points are feasible, otherwise move on to a shorter interval
                 if not is_valid(b, D, epsilon_d=epsilon_d):
@@ -239,11 +259,13 @@ def run_algorithm():
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d))
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l + 1} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / ((d + epsilon_d) ** 2)))}")
+                dose = np.sum(1 / (d + epsilon_d) ** 2)
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(dose)}")
+                targets.append(phi_A_d_modified)
+                doses.append(dose)
+                l += 1
 
-        # update gamma_prior after finding optimal d
         Z_k = get_Z_k(d, R_k @ gamma_prior @ R_k.T, epsilon=epsilon)
-        gamma_prior = get_gamma_posterior(gamma_prior, R_k, Z_k)
 
         # calculate the measurement
         # using method = "cholesky" is very important to make this run faster!
@@ -251,11 +273,21 @@ def run_algorithm():
         # sample_x = rng.multivariate_normal(target_data, gamma_prior, method='cholesky')
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
         sample_y = R_k @ target_data + sample_noise
+        plt.plot(R_k @ target_data, label="true")
+        plt.plot(sample_y, label="sample")
+        plt.plot(sample_noise, label="noise")
+        plt.legend()
+        plt.show()
 
         # calculate the new x_prior
-        Z_k = get_Z_k(d, R_k @ gamma_prior @ R_k.T, epsilon=epsilon)
         x_posterior = x_prior + gamma_prior @ R_k.T @ Z_k @ (sample_y - R_k @ x_prior)
         x_prior = x_posterior
+
+        # update gamma_prior after finding optimal d
+        gamma_prior = get_gamma_posterior(gamma_prior, R_k, Z_k)
+
+        L2error = np.sqrt(np.sum((target_data - x_prior) ** 2) / np.sum(target_data ** 2))
+        errors.append(L2error)
 
         # plot the current recreation of the ROI and other debugging features
         if PLOT_COVARIANCE:
@@ -269,12 +301,39 @@ def run_algorithm():
         if PLOT_COVARIANCE or PLOT_STD or PLOT_D:
             plt.show()
 
+    # style the plot for the reconstruction errors
+    plt.style.use(["science", "grid"])
+    plt.rcParams['figure.figsize'] = [6, 6]
+    plt.rcParams['xtick.bottom'] = True
+    plt.rcParams['xtick.labelbottom'] = True
+    plt.rcParams['ytick.left'] = True
+    plt.rcParams['ytick.labelleft'] = True
+    plt.rcParams['xtick.top'] = True
+    plt.rcParams['xtick.labeltop'] = True
+    plt.rcParams['ytick.right'] = True
+    plt.rcParams['ytick.labelright'] = True
+    
+    plt.plot(np.arange(number_of_rounds), np.array(errors), "o")
+    plt.xlabel("Iteration")
+    plt.ylabel("Relative $L^2$-reconstruction error")
+    plt.show()
+    plt.plot(np.array(targets), "o")
+    plt.xlabel("Iteration")
+    plt.ylabel(r"Modified A-optimality target function $\frac{1}{N}\sqrt{\Phi_A}$")
+    plt.show()
+    plt.plot(np.array(doses), "o")
+    plt.hlines(limits, xmin=0, xmax=len(doses), color='r', linestyle='--', alpha=0.3, label="Dose limits")
+    plt.xlabel("Iteration")
+    plt.ylabel(r"Dose of radiation $\sum_{i=1}^{km}\frac{1}{(d_i + \epsilon)^2}$")
+    plt.legend()
+    plt.show()
+
 def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = rng.multivariate_normal(x_prior, gamma_posterior, size=(4,), method='cholesky')
     sample_x = sample_x.reshape(4, N, N, order='F')
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
     for i, ax in enumerate(axs.flat):
-        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower')
+        im = ax.imshow(sample_x[i], cmap=parula_map, interpolation='nearest', origin='lower')
         fig.colorbar(im, ax=ax)
     fig.suptitle("Samples from covariance matrix")
 
@@ -282,7 +341,7 @@ def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
@@ -296,7 +355,7 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("Target reconstruction")
 

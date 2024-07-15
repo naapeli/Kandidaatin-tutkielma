@@ -8,6 +8,7 @@ from skimage.transform import resize
 import scienceplots
 
 from ProjectionMatrixCalculation import get_projection_matricies
+from colormap import parula_map
 
 
 plt.style.use(["science"])
@@ -19,6 +20,10 @@ plt.rcParams['xtick.bottom'] = False
 plt.rcParams['xtick.labelbottom'] = False
 plt.rcParams['ytick.left'] = False
 plt.rcParams['ytick.labelleft'] = False
+plt.rcParams['xtick.top'] = False
+plt.rcParams['xtick.labeltop'] = False
+plt.rcParams['ytick.right'] = False
+plt.rcParams['ytick.labelright'] = False
 
 
 def run_algorithm():
@@ -41,8 +46,8 @@ def run_algorithm():
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 500_000
-    initial_d = 0.05
+    dose_limit = 100_000
+    initial_d = 0.1
     epsilon_d = 1e-6
 
     # initialise parameters for algorithm
@@ -77,7 +82,7 @@ def run_algorithm():
         A = X ** 2 + Y ** 2 < 0.5 ** 2
     
     if PLOT_ROI:
-        plt.imshow(A, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.imshow(A, cmap=parula_map, interpolation='nearest', origin='lower')
         plt.colorbar()
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
@@ -85,7 +90,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "shepp-logan-phantom"
+    TARGET = "horseshoe"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -137,7 +142,7 @@ def run_algorithm():
         target_data[left_mask & diagonal_mask] = 0
 
     if PLOT_TARGET:
-        plt.imshow(target_data, cmap='viridis', interpolation='nearest', origin='lower')
+        plt.imshow(target_data, cmap=parula_map, interpolation='nearest', origin='lower')
         plt.title("Target")
         plt.colorbar()
         plt.show()
@@ -170,6 +175,8 @@ def run_algorithm():
     noise_mean = np.zeros(k * m)
 
     errors = []
+    targets = []
+    doses = []
 
     for i in range(number_of_rounds):
         # A-weighted prior
@@ -262,7 +269,10 @@ def run_algorithm():
                 Z_k = get_Z_k(d, Rk_gamma_prior_Rk_T, epsilon=epsilon)
                 gamma_posterior = get_gamma_posterior(gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d))
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(np.sum(1 / (d + epsilon_d) ** 2))}")
+                dose = np.sum(1 / (d + epsilon_d) ** 2)
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(dose)}")
+                targets.append(phi_A_d_modified)
+                doses.append(dose)
                 l += 1
 
         # do the experiment
@@ -302,10 +312,24 @@ def run_algorithm():
     plt.rcParams['xtick.labelbottom'] = True
     plt.rcParams['ytick.left'] = True
     plt.rcParams['ytick.labelleft'] = True
+    plt.rcParams['xtick.top'] = True
+    plt.rcParams['xtick.labeltop'] = True
+    plt.rcParams['ytick.right'] = True
+    plt.rcParams['ytick.labelright'] = True
     
-    plt.plot(np.arange(number_of_rounds), np.array(errors), ".")
+    plt.plot(np.arange(number_of_rounds), np.array(errors), "o")
     plt.xlabel("Iteration")
     plt.ylabel("Relative $L^2$-reconstruction error")
+    plt.show()
+    plt.plot(np.array(targets), "o")
+    plt.xlabel("Iteration")
+    plt.ylabel(r"Modified A-optimality target function $\frac{1}{N}\sqrt{\Phi_A}$")
+    plt.show()
+    plt.plot(np.array(doses), "o")
+    plt.hlines(limits, xmin=0, xmax=len(doses), color='r', linestyle='--', alpha=0.3, label="Dose limits")
+    plt.xlabel("Iteration")
+    plt.ylabel(r"Dose of radiation $\sum_{i=1}^{km}\frac{1}{(d_i + \epsilon)^2}$")
+    plt.legend()
     plt.show()
 
 def plot_covariance(x_prior, gamma_posterior, rng, N):
@@ -313,7 +337,7 @@ def plot_covariance(x_prior, gamma_posterior, rng, N):
     sample_x = sample_x.reshape(4, N, N, order='F')
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
     for i, ax in enumerate(axs.flat):
-        im = ax.imshow(sample_x[i], cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
+        im = ax.imshow(sample_x[i], cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
         fig.colorbar(im, ax=ax)
     fig.suptitle("Samples from posterior distribution")
 
@@ -321,7 +345,7 @@ def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
+    im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with variance")
 
@@ -335,7 +359,7 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap='viridis', interpolation='nearest', origin='lower', vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction")
 
