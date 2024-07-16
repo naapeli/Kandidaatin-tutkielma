@@ -13,7 +13,7 @@ from colormap import parula_map
 plt.style.use(["science"])
 plt.rcParams['text.usetex'] = True
 plt.rcParams['figure.figsize'] = [6, 6]
-plt.rcParams['font.size'] = 16
+plt.rcParams['font.size'] = 30
 plt.rcParams['figure.autolayout'] = True
 plt.rcParams['xtick.bottom'] = False
 plt.rcParams['xtick.labelbottom'] = False
@@ -35,24 +35,24 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
     m = 40  # number of sensors
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
-    initial_d = 0.1
+    initial_d = 0.5
     epsilon_d = 1e-6
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 5_000_000
+    dose_limit = 100_000
 
     # initialise parameters for algorithm
     learning_rate = 0.01
-    relative_tolerance = 0.00001
-    iter_per_round = 10
+    relative_tolerance = 0.001
+    iter_per_round = 20
     rng = np.random.default_rng(1)
     number_of_rounds = 10
 
@@ -88,7 +88,7 @@ def run_algorithm():
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "tumor with vein"
+    TARGET = "horseshoe"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -260,7 +260,7 @@ def run_algorithm():
                 gamma_posterior = get_gamma_posterior(weighted_gamma_prior, R_k, Z_k)
                 phi_A_d_modified = 1 / N * np.sqrt(phi_A(d, gamma_posterior, A, D, barrier_const=barrier_const, epsilon_d=epsilon_d))
                 dose = np.sum(1 / (d + epsilon_d) ** 2)
-                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} / {iter_per_round} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(dose)}")
+                print(f"Round {i + 1} / {number_of_rounds} - Iteration {l} - Modified A-optimality target function: {'{:.6f}'.format(phi_A_d_modified)} - Dose of radiation: {'{:.6f}'.format(dose)}")
                 targets.append(phi_A_d_modified)
                 doses.append(dose)
                 l += 1
@@ -343,7 +343,7 @@ def plot_std(gamma_posterior, N):
     fig, ax = plt.subplots()
     im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
-    ax.set_title("ROI reconstruction with variance")
+    ax.set_title("ROI reconstruction with standard deviation")
 
 def plot_d(d, k, m):
     fig, ax = plt.subplots()

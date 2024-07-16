@@ -14,7 +14,7 @@ from colormap import parula_map
 plt.style.use(["science"])
 plt.rcParams['text.usetex'] = True
 plt.rcParams['figure.figsize'] = [6, 6]
-plt.rcParams['font.size'] = 16
+plt.rcParams['font.size'] = 30
 plt.rcParams['figure.autolayout'] = True
 plt.rcParams['xtick.bottom'] = False
 plt.rcParams['xtick.labelbottom'] = False
@@ -347,7 +347,7 @@ def plot_std(gamma_posterior, N):
     fig, ax = plt.subplots()
     im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
-    ax.set_title("ROI reconstruction with variance")
+    ax.set_title("ROI reconstruction with standard deviation")
 
 def plot_d(d, k, m):
     _, ax = plt.subplots()
