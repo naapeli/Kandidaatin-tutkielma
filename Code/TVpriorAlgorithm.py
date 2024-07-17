@@ -308,6 +308,7 @@ def run_algorithm():
     # style the plot for the reconstruction errors
     plt.style.use(["science", "grid"])
     plt.rcParams['figure.figsize'] = [6, 6]
+    plt.rcParams['font.size'] = 16
     plt.rcParams['xtick.bottom'] = True
     plt.rcParams['xtick.labelbottom'] = True
     plt.rcParams['ytick.left'] = True
@@ -345,7 +346,7 @@ def plot_std(gamma_posterior, N):
     variances = np.sqrt(np.diag(gamma_posterior))
     variances = variances.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
+    im = ax.imshow(variances, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction with standard deviation")
 
@@ -359,7 +360,7 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction")
 
