@@ -42,7 +42,7 @@ def run_algorithm():
     m = 40  # number of sensors
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
-    initial_d = 0.5
+    initial_d = 0.1
     epsilon_d = 1e-6
     # line search parameters
     max_length = 10
@@ -63,7 +63,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define the priors
-    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.05) + epsilon * np.eye(n)
+    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.1) + epsilon * np.eye(n)
     noise_mean = np.zeros(k * m)
 
     # define ROI
@@ -81,6 +81,7 @@ def run_algorithm():
     
     if PLOT_ROI:
         plt.imshow(A, cmap=parula_map, interpolation='nearest', origin='lower')
+        plt.title("Region of interest")
         plt.colorbar()
         plt.show()
     # reshape ROI to (N * N, N * N) in Fortran style to mimic matlab
@@ -356,7 +357,7 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("Target reconstruction")
 
