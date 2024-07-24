@@ -31,7 +31,7 @@ def run_algorithm():
     PLOT_TARGET = True
     CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
-    PLOT_COVARIANCE = True  # Take 4 samples from the posterior covariance matrix
+    PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
     PLOT_STD = True  # Reconstruct the image based on the standard deviations
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
@@ -46,15 +46,15 @@ def run_algorithm():
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 100_000
-    initial_d = 0.1
+    dose_limit = 1_000_000
+    initial_d = 0.05
     epsilon_d = 1e-6
 
     # initialise parameters for algorithm
     learning_rate = 0.01
     relative_tolerance = 0.001
     rng = np.random.default_rng(1)
-    number_of_rounds = 10
+    number_of_rounds = 6
     iter_per_round = 20
 
     # parameters for lagged diffusivity iteration
@@ -69,7 +69,7 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define ROI
-    ROI = "whole"
+    ROI = "center circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -90,7 +90,7 @@ def run_algorithm():
     A = csc_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "horseshoe"
+    TARGET = "shepp-logan-phantom"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
@@ -279,6 +279,11 @@ def run_algorithm():
         gamma_noise = np.diag(d ** 2) + epsilon * np.eye(k * m)
         sample_noise = rng.multivariate_normal(noise_mean, gamma_noise, method='cholesky')
         sample_y = R_k @ target_data + sample_noise
+        plt.plot(R_k @ target_data, label="true")
+        plt.plot(sample_y, label="sample")
+        plt.plot(sample_noise, label="noise")
+        plt.legend()
+        plt.show()
 
         # determine the current posterior mean and covariance matrix
         x_posterior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
@@ -360,7 +365,7 @@ def plot_d(d, k, m):
 def plot_reconstruction(x_prior, N):
     reconstruction = x_prior.reshape(N, N, order='F')
     fig, ax = plt.subplots()
-    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower')#, vmin=0, vmax=1)
+    im = ax.imshow(reconstruction, cmap=parula_map, interpolation='nearest', origin='lower', vmin=0, vmax=1)
     fig.colorbar(im, ax=ax)
     ax.set_title("ROI reconstruction")
 

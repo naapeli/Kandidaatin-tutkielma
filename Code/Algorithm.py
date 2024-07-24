@@ -42,19 +42,19 @@ def run_algorithm():
     m = 40  # number of sensors
     epsilon = 1e-10
     offset_range = 0.8  # the maximum and minimum offset
-    initial_d = 0.1
+    initial_d = 0.5
     epsilon_d = 1e-6
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 100_000
+    dose_limit = 200_000
 
     # initialise parameters for algorithm
     learning_rate = 0.01
     relative_tolerance = 0.001
     iter_per_round = 20
     rng = np.random.default_rng(1)
-    number_of_rounds = 10
+    number_of_rounds = 6
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -63,11 +63,11 @@ def run_algorithm():
     coordinates = np.column_stack([X.ravel(), Y.ravel()])
 
     # define the priors
-    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.1) + epsilon * np.eye(n)
+    gamma_prior = gaussian_distance_covariance(coordinates, 1, 0.05) + epsilon * np.eye(n)
     noise_mean = np.zeros(k * m)
 
     # define ROI
-    ROI = "whole"
+    ROI = "center circle"
     if ROI == "whole":
         A = np.ones((N, N))
     elif ROI == "offset circle":
@@ -89,7 +89,7 @@ def run_algorithm():
     A = csr_array(np.diag(A)) # after this A is the same as Weight in matlab
 
     # define the target
-    TARGET = "horseshoe"
+    TARGET = "shepp-logan-phantom"
     if TARGET == "bar":
         target_data = np.logical_and((np.abs(Y + 0.2) < 0.05), np.abs(X) < 0.45)
     elif TARGET == "circle":
