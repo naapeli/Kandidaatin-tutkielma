@@ -27,8 +27,8 @@ plt.rcParams['ytick.labelright'] = False
 
 
 def run_algorithm():
-    PLOT_ROI = True
-    PLOT_TARGET = True
+    PLOT_ROI = False
+    PLOT_TARGET = False
     CALCULATE_PROJECTION_MATRICIES = True  # calculate the x ray matrix again or read from memory
     TRACK_PHI_A = True  # track the target function on every picture during gradient descent
     PLOT_COVARIANCE = False  # Take 4 samples from the posterior covariance matrix
@@ -36,7 +36,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 50  # pixels per edge
+    N = 30  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
@@ -46,8 +46,8 @@ def run_algorithm():
     # line search parameters
     max_length = 10
     barrier_const = 0.00001
-    dose_limit = 1_000_000
-    initial_d = 0.05
+    dose_limit = 100_000
+    initial_d = 0.5
     epsilon_d = 1e-6
 
     # initialise parameters for algorithm
@@ -60,7 +60,7 @@ def run_algorithm():
     # parameters for lagged diffusivity iteration
     tau = 1e-5
     T = 1e-6
-    gamma = 10
+    gamma = 10 ** 2
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -168,20 +168,22 @@ def run_algorithm():
     # define initial parameters d and the limit D
     d = initial_d * np.ones(shape=(k * m,))
     limits = np.linspace(1.1 * k * m / initial_d ** 2, dose_limit, number_of_rounds)
+    limits = np.array([dose_limit])
 
     # prior covariance matrix
-    inv_gamma_prior = 1 / gamma ** 2 * get_H(N, np.ones(n))
+    inv_gamma_prior = 1 / gamma * get_H(N, np.ones(n))
     gamma_prior = np.linalg.inv(inv_gamma_prior.todense())
+    # gamma_prior /= np.max(gamma_prior) # make the prior between 0 and 1
     noise_mean = np.zeros(k * m)
+    plt.imshow(gamma_prior)
+    plt.colorbar()
+    plt.show()
 
     errors = []
     targets = []
     doses = []
 
     for i in range(number_of_rounds):
-        # A-weighted prior
-        gamma_prior = gamma_prior @ A
-
         D = limits[i]
         # calculate helper matricies that remain the same during the gradient descent
         Rk_gamma_prior_Rk_T = R_k @ gamma_prior @ R_k.T
@@ -288,11 +290,11 @@ def run_algorithm():
         # determine the current posterior mean and covariance matrix
         x_posterior = compute_reco(R_k, sample_y, gamma_noise, inv_gamma_prior, T, gamma, N, tau)
         x_prior = x_posterior
-        edges, _ = gradient_reco(np.reshape(x_prior, (N, N), order="F"))
 
         # calculate inv_gamma_prior for new optimisation round
+        edges, _ = gradient_reco(np.reshape(x_prior, (N, N), order="F"))
         weight = 1 / np.sqrt(T ** 2 + edges ** 2)
-        inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
+        inv_gamma_prior = 1 / gamma * get_H(N, weight)
 
         gamma_posterior = np.linalg.inv(inv_gamma_prior + R_k.T @ np.diag(1 / np.diag(gamma_noise)) @ R_k)
         gamma_prior = gamma_posterior
@@ -437,7 +439,7 @@ def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
         sum = np.sum(np.sum(edges))
         rel_diff = np.abs(sum - sum_old) / sum
         weight = 1 / np.sqrt(T ** 2 + edges ** 2)
-        inv_gamma_prior = 1 / gamma ** 2 * get_H(N, weight)
+        inv_gamma_prior = 1 / gamma * get_H(N, weight)
         i += 1
     return np.reshape(Reco, N ** 2, order="F")
 
