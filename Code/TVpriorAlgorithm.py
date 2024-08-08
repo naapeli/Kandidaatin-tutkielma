@@ -36,7 +36,7 @@ def run_algorithm():
     PLOT_D = True  # plot the vector d as a function of it's indicies
     PLOT_RECONSTRUCTION = True  # plot the posterior mean of the distribution for the image
 
-    N = 30  # pixels per edge
+    N = 50  # pixels per edge
     n = N ** 2
     k = 8  # number of angles (or X-ray images)
     mm = 10  # number of rays per sensor
@@ -60,7 +60,7 @@ def run_algorithm():
     # parameters for lagged diffusivity iteration
     tau = 1e-5
     T = 1e-6
-    gamma = 10 ** 2
+    gamma = 100 ** 2
 
     # define the grid
     x = np.linspace(-0.5, 0.5, N)
@@ -167,8 +167,8 @@ def run_algorithm():
     
     # define initial parameters d and the limit D
     d = initial_d * np.ones(shape=(k * m,))
-    limits = np.linspace(1.1 * k * m / initial_d ** 2, dose_limit, number_of_rounds)
-    limits = np.array([dose_limit])
+    limits = np.linspace(40 * k * m / initial_d ** 2, dose_limit, number_of_rounds)
+    # limits = np.array([dose_limit])
 
     # prior covariance matrix
     inv_gamma_prior = 1 / gamma * get_H(N, np.ones(n))
@@ -426,6 +426,7 @@ def get_H(N, weight):
     return L
 
 def compute_reco(R, data, gamma_noise, inv_gamma_prior, T, gamma, N, tau):
+    gamma = 10 ** 2
     rel_diff = tau + 1
     sum = 0
     i = 0
